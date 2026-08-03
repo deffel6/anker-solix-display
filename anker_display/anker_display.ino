@@ -1,29 +1,38 @@
 /*
 ╔═════════════════════════════════════════════════════════════╗
 ║  Anker Solix Display – ESP32-C3 + GC9A01A 240x240 rund      ║
-║  Version 1.2.4                                              ║
-║  Korrekturen aus dem Abgleich mit der App:                  ║
-║   - 0xac ist die AKKU-Leistung (negativ = Entladen),        ║
-║     nicht die Netzleistung. ab + |ac| ergibt exakt 0xad.    ║
-║   - "battery" aus state_info ist NICHT der Ladestand        ║
-║     (stand auf 100, real waren es 9 %).                     ║
-║   - [INT] listet alle 1-Byte-Werte 0..100 – darunter ist    ║
-║     der echte Ladestand. 0xa3 wird vorlaeufig benutzt.      ║
-║  --- Format-Doku aus 1.2.3 ---                              ║
-║  ECHTZEITDATEN AUF DEM DISPLAY – alle 3 Sekunden            ║
+║                                                             ║
+║  Zeigt Solarleistung, Akkustand, Akkuleistung und Netzbezug ║
+║  einer Anker SOLIX Solarbank an – alle 3 Sekunden.          ║
+║                                                             ║
+║  Die REST-API liefert nur 5-Minuten-Cachedaten, und ihr     ║
+║  verschluesselter Endpunkt (algo_ecdh) ist bis heute nicht  ║
+║  nachgebaut. Die Werte kommen deshalb ueber Ankers          ║
+║  MQTT-Broker: get_user_mqtt_info liefert ein Zertifikat,    ║
+║  damit TLS zu aiot-mqtt-eu.anker.com, und ein Trigger       ║
+║  bringt die Solarbank auf den 3-Sekunden-Takt.              ║
 ║                                                             ║
 ║  param_info-Binaerformat (Nachrichtentyp 0405):             ║
 ║    ff 09 | len(LE16) | 03 01 0f | 04 05 | Felder            ║
 ║    Feld:  tag(1) len(1) typ(1) wert(len-1)                  ║
 ║    typ:   00=String 01=u8 02=i16 03=u32 05=float32(LE)      ║
-║  Belegt (durch Summenprobe bestaetigt):                     ║
-║    ab,c2 = PV gesamt   c6..c9 = die vier MPPT-Strings       ║
-║    ac    = Leistung, negativ (Netz o. Akku – zu pruefen)    ║
-║    fe    = Unix-Zeit   be = 800 W Einspeisegrenze           ║
-║  Akkustand kommt als Klartext-JSON per state_info.          ║
+║                                                             ║
+║  Belegte Felder – Solarbank A17C5:                          ║
+║    a3      Ladestand in %                                   ║
+║    ab, c2  Solarleistung gesamt (W)                         ║
+║    ac      Akkuleistung (W), negativ = Entladen             ║
+║    ad      Ausgangsleistung (W) = ab + ac                   ║
+║    c6..c9  die vier MPPT-Strings, Summe = ab                ║
+║  Netzzaehler SHEM3 – Werte als u32, nicht float:            ║
+║    a8      Netzbezug, a9 Einspeisung (Hundertstel-Watt)     ║
+║                                                             ║
+║  ACHTUNG: "battery" aus state_info ist NICHT der Ladestand  ║
+║  – der Wert steht konstant auf 100. Es gilt a3.             ║
+║                                                             ║
+║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.2.8"
+#define FW_VERSION "1.2.9"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -658,7 +667,45 @@ void handleSave(){
     }
   } else { server.sendHeader("Location","/"); server.send(302); }
 }
-void handleNotFound(){server.sendHeader("Location","http://192.168.4.1/");server.send(302);}
+// Anmeldeseite fuer unbekannte Adressen.
+// Ein blosses 302 ohne Rumpf werten manche Systeme nicht als Anmeldeseite,
+// deshalb kommt hier eine echte Seite mit Code 200 zurueck. Die Umleitung
+// uebernimmt das enthaltene <meta refresh> plus ein sichtbarer Link fuer
+// den Fall, dass das Fenster die Weiterleitung unterdrueckt.
+void handleNotFound(){
+  server.sendHeader("Cache-Control","no-store");
+  server.send(200,"text/html",
+    F("<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<meta http-equiv='refresh' content='0; url=http://192.168.4.1/'>"
+      "<title>Anker Display Setup</title></head>"
+      "<body style='font-family:-apple-system,sans-serif;background:#0a0a0a;"
+      "color:#eee;text-align:center;padding:60px 20px'>"
+      "<h2 style='color:#f0a500'>Anker Display Setup</h2>"
+      "<p>Weiterleitung zur Einrichtung&hellip;</p>"
+      "<p style='margin-top:24px'><a style='color:#f0a500;font-size:1.2rem'"
+      " href='http://192.168.4.1/'>Hier tippen, falls nichts passiert</a></p>"
+      "</body></html>"));
+}
+
+// Adressen, mit denen Betriebssysteme pruefen, ob ein Netz ins Internet fuehrt.
+// Antwortet der ESP32 darauf statt mit der erwarteten Erfolgsmeldung, oeffnet
+// das Geraet die Anmeldeseite. Ohne diese Handler landen die Anfragen zwar
+// ebenfalls bei handleNotFound, aber explizit ist es verlaesslicher.
+void registerCaptiveProbes(){
+  const char* probes[] = {
+    "/hotspot-detect.html",           // iOS, macOS
+    "/library/test/success.html",     // iOS, aeltere Fassungen
+    "/generate_204",                  // Android
+    "/gen_204",                       // Android
+    "/connecttest.txt",               // Windows
+    "/ncsi.txt",                      // Windows
+    "/canonical.html",                // Firefox
+    "/success.txt",                   // Firefox, Ubuntu
+    "/chat",                          // einige Android-Fassungen
+  };
+  for(const char* p : probes) server.on(p, HTTP_GET, handleNotFound);
+}
 
 void startConfigPortal(){
   lcd.fillScreen(C_BLACK);
@@ -667,13 +714,22 @@ void startConfigPortal(){
   dispCenter(100,AP_SSID,          C_WHITE, &fonts::FreeSans9pt7b);
   dispCenter(125,"Dann Browser:",  C_GRAY,  &fonts::FreeSans9pt7b);
   dispCenter(145,AP_IP,            C_YELLOW,&fonts::FreeSans9pt7b);
-  WiFi.mode(WIFI_AP); WiFi.softAP(AP_SSID);
+  // Reihenfolge ist entscheidend: erst konfigurieren, dann starten.
+  // Umgekehrt laeuft der DHCP-Server kurz mit Standardwerten und verteilt
+  // moeglicherweise nicht 192.168.4.1 als DNS – dann wird der Platzhalter-DNS
+  // unten nie gefragt und die Anmeldeseite oeffnet sich nicht von selbst.
   IPAddress ip(192,168,4,1),gw(192,168,4,1),sn(255,255,255,0);
-  WiFi.softAPConfig(ip,gw,sn); dns.start(53,"*",ip);
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(ip,gw,sn);
+  WiFi.softAP(AP_SSID);
+  delay(200);                     // AP kurz hochkommen lassen
+  dns.setErrorReplyCode(DNSReplyCode::NoError);
+  dns.start(53,"*",ip);
   server.on("/",          HTTP_GET,  handleRoot);
   server.on("/save",      HTTP_POST, handleSave);
   server.on("/sites",     HTTP_GET,  handleSites);
   server.on("/selectsite",HTTP_GET,  handleSelectSite);
+  registerCaptiveProbes();
   server.onNotFound(handleNotFound); server.begin();
   while(true){dns.processNextRequest();server.handleClient();delay(5);}
 }
