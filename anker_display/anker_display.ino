@@ -32,7 +32,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.3.0"
+#define FW_VERSION "1.4.0"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -565,7 +565,36 @@ void handleRoot(){
   p.replace("__WSSID__",cfg.wifiSsid); p.replace("__EMAIL__",cfg.ankerEmail);
   server.send(200,"text/html; charset=utf-8",p);
 }
-void handleSites(){ server.send(200,"text/html; charset=utf-8",buildSiteSelectPage()); }
+// Vorwaertsdeklarationen – werden von den Handlern weiter unten gebraucht,
+// sind aber erst spaeter im Sketch definiert.
+String httpsPost(const String& path, const String& body,
+                 const String& token="", const String& gtoken="",
+                 bool encrypt=false);
+void handleSave();
+
+// Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
+// leer, weil sie sonst nur beim Einrichten gefuellt wird.
+bool loadSiteList(){
+  String resp=httpsPost("power_service/v1/site/get_site_list",
+                        "{\"page\":1,\"size\":10}",gAuthToken,gGtoken,false);
+  if(resp.isEmpty()) return false;
+  DynamicJsonDocument doc(4096);
+  if(deserializeJson(doc,resp)!=DeserializationError::Ok) return false;
+  gSiteCount=0;
+  for(auto s:doc["data"]["site_list"].as<JsonArray>()){
+    if(gSiteCount>=10) break;
+    gSiteList[gSiteCount].id  =s["site_id"].as<String>();
+    gSiteList[gSiteCount].name=s["site_name"].as<String>();
+    gSiteCount++;
+  }
+  Serial.printf("[Web] %d Anlagen geladen\n",gSiteCount);
+  return gSiteCount>0;
+}
+
+void handleSites(){
+  if(gSiteCount==0) loadSiteList();     // im Normalbetrieb erst nachladen
+  server.send(200,"text/html; charset=utf-8",buildSiteSelectPage());
+}
 void handleSelectSite(){
   String id=server.arg("id"); String name="";
   for(int i=0;i<gSiteCount;i++) if(gSiteList[i].id==id){name=gSiteList[i].name;break;}
@@ -575,10 +604,67 @@ void handleSelectSite(){
   delay(2500); ESP.restart();
 }
 
-// Vorwaertsdeklarationen
-String httpsPost(const String& path, const String& body,
-                 const String& token="", const String& gtoken="",
-                 bool encrypt=false);
+// Startseite im Normalbetrieb: Messwerte plus Zugang zur Anlagenauswahl.
+// Im Einrichtungsmodus zeigt "/" dagegen das Zugangsdaten-Formular.
+void handleStatus(){
+  // Grosszuegig bemessen: die Vorlage samt CSS liegt bei rund 1500 Zeichen,
+  // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
+  char b[2600];
+  const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
+  snprintf(b,sizeof(b),
+    "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<meta http-equiv='refresh' content='10'>"
+    "<title>%s &ndash; Anker Display</title><style>"
+    "*{box-sizing:border-box;margin:0;padding:0}"
+    "body{font-family:-apple-system,sans-serif;background:#0a0a0a;color:#eee;"
+    "display:flex;justify-content:center;padding:20px}"
+    ".card{background:#1a1a1a;border-radius:16px;padding:26px;width:100%%;max-width:420px}"
+    "h1{font-size:1.3rem;margin-bottom:2px}.sub{color:#888;font-size:.85rem;margin-bottom:22px}"
+    "table{width:100%%;border-collapse:collapse;margin-bottom:22px}"
+    "td{padding:9px 0;border-bottom:1px solid #262626;font-size:.95rem}"
+    "td:last-child{text-align:right;font-weight:600}"
+    "tr:last-child td{border-bottom:none}"
+    ".w{color:#f0a500}.g{color:#4caf50}.r{color:#f66}"
+    "a.btn{display:block;padding:13px;background:#f0a500;color:#000;text-align:center;"
+    "border-radius:10px;text-decoration:none;font-weight:700;margin-bottom:10px}"
+    "a.sec{display:block;padding:11px;background:#222;color:#aaa;text-align:center;"
+    "border-radius:10px;text-decoration:none;font-size:.9rem}"
+    "</style></head><body><div class='card'>"
+    "<h1>&#9889; %s</h1><p class='sub'>MQTT %s &middot; Firmware %s</p>"
+    "<table>"
+    "<tr><td>Solar</td><td class='w'>%.0f W</td></tr>"
+    "<tr><td>Akku</td><td>%.0f %%</td></tr>"
+    "<tr><td>Akkuleistung</td><td class='%s'>%.0f W</td></tr>"
+    "<tr><td>Netz</td><td class='%s'>%.0f W</td></tr>"
+    "<tr><td>Hausverbrauch</td><td>%.0f W</td></tr>"
+    "</table>"
+    "<a class='btn' href='/sites'>Anlage wechseln</a>"
+    "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
+    "</div></body></html>",
+    cfg.siteName.c_str(), cfg.siteName.c_str(), mq, FW_VERSION,
+    gData.solar_w, gData.battery_pct,
+    gData.batt_out_w>0.5f?"r":"g",
+    gData.batt_in_w>0.5f?gData.batt_in_w:gData.batt_out_w,
+    gData.grid_w>0.5f?"r":"g", fabsf(gData.grid_w),
+    gData.home_w);
+  server.send(200,"text/html; charset=utf-8",b);
+}
+
+// Webserver im Normalbetrieb starten, damit die Anlage ohne Reset und ohne
+// neues Flashen gewechselt werden kann.
+void startWebUi(){
+  server.on("/",           HTTP_GET,  handleStatus);
+  server.on("/setup",      HTTP_GET,  handleRoot);
+  server.on("/save",       HTTP_POST, handleSave);
+  server.on("/sites",      HTTP_GET,  handleSites);
+  server.on("/selectsite", HTTP_GET,  handleSelectSite);
+  server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
+  server.begin();
+  Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
+}
+
+// Vorwaertsdeklarationen (httpsPost steht schon weiter oben)
 bool ankerLogin();
 bool ankerKeyExchange();
 bool fetchMqttCreds();
@@ -1522,6 +1608,7 @@ void setup(){
   if(fetchMqttCreds() && fetchDeviceInfo()) mqttConnect();
   // fetchData() entfaellt: get_scen_info liefert nur 463, die Werte
   // kommen jetzt vollstaendig ueber MQTT.
+  startWebUi();
   lcd.fillScreen(C_BLACK);
   drawDisplay();
 }
@@ -1532,6 +1619,7 @@ void setup(){
 static unsigned long lastFetch=0, lastClock=0;
 void loop(){
   unsigned long now=millis();
+  server.handleClient();   // Weboberflaeche bedienen
   // MQTT am Leben halten – ohne loop() kommen keine Nachrichten an
   if(gMqtt.connected()){
     gMqtt.loop();

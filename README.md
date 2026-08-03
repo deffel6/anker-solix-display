@@ -59,8 +59,21 @@ wählen und hochladen.
 
 Beim ersten Start öffnet der ESP32 ein WLAN namens **Anker-Display-Setup**.
 Damit verbinden, im Browser `192.168.4.1` aufrufen und dort WLAN-Zugang und
-Anker-Konto eintragen. Nach dem Neustart erscheint auf dem Display eine
-IP-Adresse — die im Heimnetz aufrufen und die gewünschte Anlage auswählen.
+Anker-Konto eintragen. Das Gerät übernimmt anschließend die erste Anlage des
+Kontos und startet neu — bei nur einer Anlage ist die Einrichtung damit fertig.
+
+## Weboberfläche
+
+Im laufenden Betrieb ist das Display im Heimnetz über seine IP-Adresse
+erreichbar. Sie steht beim Booten kurz auf dem Bildschirm und im seriellen
+Monitor. Die Seite zeigt die aktuellen Messwerte und aktualisiert sich alle
+zehn Sekunden. Darüber lässt sich außerdem
+
+- die **Anlage wechseln** — nötig, wenn das Konto mehrere hat, denn automatisch
+  wird immer die erste genommen,
+- und die **Zugangsdaten ändern**, etwa nach einem WLAN-Wechsel.
+
+Beides ohne Reset und ohne neu zu flashen.
 
 Das Anker-Passwort wird verschlüsselt an Anker übertragen (ECDH plus AES, so wie
 die App es macht) und liegt lokal im NVS-Flash des ESP32. Es verlässt das Gerät
