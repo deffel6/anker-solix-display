@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anker Solix Display – Installation</title>
+<script type="module"
+        src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
+<style>
+  :root{
+    --bg:#0a0a0a; --card:#161616; --line:#2a2a2a;
+    --fg:#eee; --dim:#999; --accent:#f0a500;
+  }
+  @media (prefers-color-scheme:light){
+    :root{ --bg:#f6f6f6; --card:#fff; --line:#e2e2e2; --fg:#1a1a1a; --dim:#666; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--fg);
+    line-height:1.6; padding:24px; display:flex; justify-content:center;
+  }
+  .wrap{width:100%;max-width:640px}
+  h1{font-size:1.6rem;margin-bottom:4px}
+  .sub{color:var(--dim);margin-bottom:28px}
+  .card{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:22px; margin-bottom:18px;
+  }
+  h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;
+     color:var(--accent);margin-bottom:12px}
+  ol{padding-left:20px} li{margin-bottom:7px}
+  .cta{text-align:center;padding:28px 22px}
+  .note{
+    border-left:3px solid var(--accent);
+    padding:12px 16px;background:var(--card);
+    border-radius:0 8px 8px 0;color:var(--dim);font-size:.9rem;
+    margin-bottom:18px;
+  }
+  table{width:100%;border-collapse:collapse;font-size:.9rem}
+  td{padding:6px 0;border-bottom:1px solid var(--line)}
+  td:last-child{text-align:right;color:var(--dim)}
+  tr:last-child td{border-bottom:none}
+  a{color:var(--accent)}
+  esp-web-install-button{--esp-tools-button-color:#000;}
+  footer{text-align:center;color:var(--dim);font-size:.85rem;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>⚡ Anker Solix Display</h1>
+  <p class="sub">Firmware direkt aus dem Browser auf den ESP32-C3 spielen.</p>
+
+  <div class="note">
+    Funktioniert nur in <strong>Chrome</strong> oder <strong>Edge</strong> auf
+    dem Rechner. Firefox und Safari unterstützen den seriellen Zugriff im
+    Browser nicht, und auf Mobilgeräten geht es ebenfalls nicht.
+  </div>
+
+  <div class="card cta">
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate" style="
+        font:600 1rem/1 inherit; padding:15px 32px; cursor:pointer;
+        background:var(--accent); color:#000; border:none; border-radius:10px;">
+        Firmware installieren
+      </button>
+      <span slot="unsupported">
+        Dieser Browser kann das nicht — bitte Chrome oder Edge verwenden.
+      </span>
+      <span slot="not-allowed">
+        Nur über HTTPS oder localhost möglich.
+      </span>
+    </esp-web-install-button>
+  </div>
+
+  <div class="card">
+    <h2>Danach einrichten</h2>
+    <ol>
+      <li>Der ESP32 spannt ein WLAN namens <strong>Anker-Display-Setup</strong> auf.</li>
+      <li>Damit verbinden und im Browser <strong>192.168.4.1</strong> aufrufen.</li>
+      <li>WLAN-Zugang und Anker-Konto eintragen, speichern.</li>
+      <li>Nach dem Neustart zeigt das Display eine IP-Adresse — die im Heimnetz
+          aufrufen und die Anlage auswählen.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>Angezeigte Werte</h2>
+    <table>
+      <tr><td>Solarleistung</td><td>alle 3 s</td></tr>
+      <tr><td>Akkustand</td><td>alle 3 s</td></tr>
+      <tr><td>Akkuleistung mit Richtung</td><td>alle 3 s</td></tr>
+      <tr><td>Netzbezug / Einspeisung</td><td>alle 3 s</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Getestete Hardware</h2>
+    <table>
+      <tr><td>Board</td><td>ESP32-C3</td></tr>
+      <tr><td>Display</td><td>GC9A01A, 240×240 rund</td></tr>
+      <tr><td>Speicher</td><td>Solarbank 3 Pro E2700 (A17C5)</td></tr>
+      <tr><td>Netzzähler</td><td>Shelly EM3 (SHEM3)</td></tr>
+    </table>
+  </div>
+
+  <footer>
+    <a href="https://github.com/deffel6/anker-solix-display">Quelltext auf GitHub</a>
+    &nbsp;·&nbsp; Kein offizielles Anker-Projekt
+  </footer>
+
+</div>
+</body>
+</html>
