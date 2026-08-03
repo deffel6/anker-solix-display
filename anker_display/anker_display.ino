@@ -32,7 +32,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.2.9"
+#define FW_VERSION "1.3.0"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -634,10 +634,8 @@ void handleSave(){
     }
     String myIp=WiFi.localIP().toString();
     lcd.fillScreen(C_BLACK);
-    dispCenter( 70,"Im Browser oeffnen:", C_GREEN, &fonts::FreeSansBold12pt7b);
-    dispCenter(105,myIp.c_str(),          C_YELLOW,&fonts::FreeSans9pt7b);
-    dispCenter(130,"/sites",              C_YELLOW,&fonts::FreeSans9pt7b);
-    dispCenter(165,"(im Heimnetz!)",      C_GRAY,  &fonts::FreeSans9pt7b);
+    dispCenter( 95,"Melde bei Anker an...",C_GREEN,&fonts::FreeSansBold12pt7b);
+    dispCenter(125,cfg.ankerEmail.c_str(), C_GRAY, &fonts::FreeSans9pt7b);
     configTzTime("CET-1CEST,M3.5.0,M10.5.0/3","pool.ntp.org","1.de.pool.ntp.org");
     delay(1000);
     ecdhInit();
@@ -656,6 +654,24 @@ void handleSave(){
           gSiteCount++;
         }
         Serial.printf("[Save] %d Sites\n",gSiteCount);
+        // Erste Anlage automatisch uebernehmen – keine Auswahlseite mehr.
+        // Ueber /sites laesst sich das nachtraeglich aendern.
+        if(gSiteCount>0){
+          cfg.siteId  =gSiteList[0].id;
+          cfg.siteName=gSiteList[0].name;
+          saveConfig();
+          Serial.printf("[Save] Anlage automatisch: %s\n",cfg.siteName.c_str());
+          lcd.fillScreen(C_BLACK);
+          dispCenter( 70,"Anlage gewaehlt:",  C_GREEN, &fonts::FreeSansBold12pt7b);
+          dispCenter(105,cfg.siteName.c_str(),C_YELLOW,&fonts::FreeSans9pt7b);
+          if(gSiteCount>1){
+            dispCenter(140,"Aendern im Browser:",C_GRAY,&fonts::FreeSans9pt7b);
+            dispCenter(160,(myIp+"/sites").c_str(),C_GRAY,&fonts::FreeSans9pt7b);
+          }
+          dispCenter(195,"Neustart in 3s...", C_GRAY,  &fonts::FreeSans9pt7b);
+          delay(3000);
+          ESP.restart();
+        }
       }
     } else {
       lcd.fillScreen(C_BLACK);
