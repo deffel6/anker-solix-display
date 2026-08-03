@@ -1,0 +1,11 @@
+# Arduino-Build-Reste
+build/
+*.hex
+*.elf
+*.map
+
+# macOS
+.DS_Store
+
+# Die Firmware-Binärdateien im Installer werden bewusst mit eingecheckt,
+# damit GitHub Pages sie ausliefern kann.
