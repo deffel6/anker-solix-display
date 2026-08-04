@@ -135,6 +135,10 @@ Rückmeldungen zu anderen Modellen sind willkommen — am hilfreichsten ist die
 `[NETZ]`- beziehungsweise `[INT]`-Ausgabe aus dem seriellen Monitor zusammen mit
 den Werten, die die App zur selben Zeit anzeigt.
 
+## Änderungen
+
+Siehe [CHANGELOG.md](CHANGELOG.md).
+
 ## Lizenz
 
 MIT, siehe [LICENSE](LICENSE).
