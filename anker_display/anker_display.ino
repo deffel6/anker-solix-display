@@ -32,7 +32,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.4.0"
+#define FW_VERSION "1.4.2"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -146,7 +146,9 @@ static unsigned long    gMqttConnectedAt = 0; // Startpunkt der Lauschphase
 static unsigned long    gLastTrigger   = 0;
 static bool             gTriggerArmed  = false;
 
-struct SiteEntry { String id; String name; };
+// sns: Seriennummern der Geraete dieser Anlage, mit Komma verkettet.
+// Damit laesst sich pruefen, ob eine Anlage ein erreichbares Geraet hat.
+struct SiteEntry { String id; String name; String sns; };
 static SiteEntry gSiteList[10];
 static int       gSiteCount = 0;
 
@@ -570,6 +572,7 @@ void handleRoot(){
 String httpsPost(const String& path, const String& body,
                  const String& token="", const String& gtoken="",
                  bool encrypt=false);
+static int rawPost(const String& path, const String& body, String& outResp);
 void handleSave();
 
 // Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
@@ -585,10 +588,59 @@ bool loadSiteList(){
     if(gSiteCount>=10) break;
     gSiteList[gSiteCount].id  =s["site_id"].as<String>();
     gSiteList[gSiteCount].name=s["site_name"].as<String>();
+    gSiteList[gSiteCount].sns ="";
+    for(auto d:s["site_device_list"].as<JsonArray>())
+      gSiteList[gSiteCount].sns += d["device_sn"].as<String>()+",";
     gSiteCount++;
   }
   Serial.printf("[Web] %d Anlagen geladen\n",gSiteCount);
   return gSiteCount>0;
+}
+
+// Index der ersten Anlage mit einem erreichbaren Geraet.
+// get_relate_and_bind_devices meldet je Geraet wifi_online; eine Anlage,
+// deren Solarbank offline steht, liefert keine Messwerte und waere eine
+// schlechte Vorauswahl. Faellt auf 0 zurueck, wenn nichts erreichbar ist.
+int firstOnlineSite(){
+  String resp;
+  if(rawPost("power_service/v1/app/get_relate_and_bind_devices","{}",resp)!=200)
+    return 0;
+  // Seriennummern der erreichbaren Geraete einsammeln
+  String online;
+  int i=0;
+  while(true){
+    int d=resp.indexOf("\"device_sn\":\"",i);
+    if(d<0) break;
+    d+=13;
+    int e=resp.indexOf('"',d);
+    if(e<0) break;
+    String sn=resp.substring(d,e);
+    // wifi_online steht im selben Objekt, also vor der naechsten Seriennummer
+    int nxt=resp.indexOf("\"device_sn\":\"",e);
+    String chunk = (nxt<0) ? resp.substring(e) : resp.substring(e,nxt);
+    if(chunk.indexOf("\"wifi_online\":true")>=0) online += sn+",";
+    i=e;
+  }
+  if(online.isEmpty()){
+    Serial.println("[Site] kein Geraet erreichbar – nehme die erste Anlage");
+    return 0;
+  }
+  for(int k=0;k<gSiteCount;k++){
+    int j=0;
+    while(j<(int)gSiteList[k].sns.length()){
+      int c=gSiteList[k].sns.indexOf(',',j);
+      if(c<0) break;
+      String sn=gSiteList[k].sns.substring(j,c);
+      if(sn.length() && online.indexOf(sn+",")>=0){
+        Serial.printf("[Site] %s ist erreichbar (%s)\n",
+                      gSiteList[k].name.c_str(),sn.c_str());
+        return k;
+      }
+      j=c+1;
+    }
+  }
+  Serial.println("[Site] keine Anlage mit erreichbarem Geraet – nehme die erste");
+  return 0;
 }
 
 void handleSites(){
@@ -672,7 +724,6 @@ bool fetchDeviceInfo();
 bool mqttConnect();
 void sendRealtimeTrigger(uint16_t timeoutSec);
 static void printLong(const char* tag, const String& s);
-static int  rawPost(const String& path, const String& body, String& outResp);
 bool ecdhInit();
 
 void handleSave(){
@@ -737,22 +788,28 @@ void handleSave(){
           if(gSiteCount>=10) break;
           gSiteList[gSiteCount].id  =s["site_id"].as<String>();
           gSiteList[gSiteCount].name=s["site_name"].as<String>();
+          gSiteList[gSiteCount].sns ="";
+          for(auto d:s["site_device_list"].as<JsonArray>())
+            gSiteList[gSiteCount].sns += d["device_sn"].as<String>()+",";
           gSiteCount++;
         }
         Serial.printf("[Save] %d Sites\n",gSiteCount);
         // Erste Anlage automatisch uebernehmen – keine Auswahlseite mehr.
         // Ueber /sites laesst sich das nachtraeglich aendern.
         if(gSiteCount>0){
-          cfg.siteId  =gSiteList[0].id;
-          cfg.siteName=gSiteList[0].name;
+          int pick=firstOnlineSite();
+          cfg.siteId  =gSiteList[pick].id;
+          cfg.siteName=gSiteList[pick].name;
           saveConfig();
           Serial.printf("[Save] Anlage automatisch: %s\n",cfg.siteName.c_str());
           lcd.fillScreen(C_BLACK);
           dispCenter( 70,"Anlage gewaehlt:",  C_GREEN, &fonts::FreeSansBold12pt7b);
           dispCenter(105,cfg.siteName.c_str(),C_YELLOW,&fonts::FreeSans9pt7b);
           if(gSiteCount>1){
+            // Nur die IP – die Weboberflaeche unter "/" hat seit 1.4.0
+            // eine Schaltflaeche zum Anlagenwechsel.
             dispCenter(140,"Aendern im Browser:",C_GRAY,&fonts::FreeSans9pt7b);
-            dispCenter(160,(myIp+"/sites").c_str(),C_GRAY,&fonts::FreeSans9pt7b);
+            dispCenter(160,myIp.c_str(),         C_YELLOW,&fonts::FreeSans9pt7b);
           }
           dispCenter(195,"Neustart in 3s...", C_GRAY,  &fonts::FreeSans9pt7b);
           delay(3000);
@@ -1503,10 +1560,20 @@ void drawDisplay(){
   }
 
   if(!gData.valid){
-    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_RED,C_BLACK);
-    g->drawString("KEIN SIGNAL",120,120);
+    // Steht die MQTT-Verbindung, warten wir nur auf die erste Nachricht –
+    // das ist der Normalfall beim Start und keine Stoerung. Rot bleibt
+    // dem Fall vorbehalten, in dem tatsaechlich keine Verbindung besteht.
+    bool linked = gMqtt.connected();
+    g->setFont(&fonts::FreeSansBold12pt7b);
+    g->setTextColor(linked?C_ORANGE:C_RED, C_BLACK);
+    g->drawString(linked?"Decodiere Daten":"Keine Verbindung", 120, 108);
     g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
-    g->drawString("Verbinde Anker.",120,150);
+    g->drawString(linked?"Warte auf Solarbank":"Verbinde mit Anker...", 120, 138);
+    // IP-Adresse: ueber sie laeuft die Weboberflaeche
+    if(WiFi.status()==WL_CONNECTED){
+      g->setTextColor(C_BLUE,C_BLACK);
+      g->drawString(WiFi.localIP().toString().c_str(), 120, 168);
+    }
     if(useSprite) spr.pushSprite(0,0);
     return;
   }
