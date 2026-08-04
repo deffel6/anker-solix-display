@@ -59,8 +59,13 @@ wählen und hochladen.
 
 Beim ersten Start öffnet der ESP32 ein WLAN namens **Anker-Display-Setup**.
 Damit verbinden, im Browser `192.168.4.1` aufrufen und dort WLAN-Zugang und
-Anker-Konto eintragen. Das Gerät übernimmt anschließend die erste Anlage des
-Kontos und startet neu — bei nur einer Anlage ist die Einrichtung damit fertig.
+Anker-Konto eintragen. Das Gerät wählt anschließend selbst eine Anlage und
+startet neu — bei nur einer Anlage ist die Einrichtung damit fertig.
+
+Bei mehreren Anlagen nimmt es die erste, in der ein **erreichbares** Gerät
+steht (`wifi_online`). Eine Anlage, deren Solarbank gerade offline ist, liefert
+schließlich keine Messwerte. Ist nichts erreichbar, fällt es auf die erste
+Anlage zurück; über die Weboberfläche lässt sich jederzeit umstellen.
 
 ## Weboberfläche
 
@@ -69,8 +74,8 @@ erreichbar. Sie steht beim Booten kurz auf dem Bildschirm und im seriellen
 Monitor. Die Seite zeigt die aktuellen Messwerte und aktualisiert sich alle
 zehn Sekunden. Darüber lässt sich außerdem
 
-- die **Anlage wechseln** — nötig, wenn das Konto mehrere hat, denn automatisch
-  wird immer die erste genommen,
+- die **Anlage wechseln**, falls die automatische Wahl nicht die gewünschte
+  getroffen hat,
 - und die **Zugangsdaten ändern**, etwa nach einem WLAN-Wechsel.
 
 Beides ohne Reset und ohne neu zu flashen.
