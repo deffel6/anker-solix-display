@@ -57,10 +57,16 @@
   tr:last-child td{border-bottom:none}
   a{color:var(--accent)}
   esp-web-install-button{--esp-tools-button-color:#000;}
-  .support{
-    text-align:center;color:var(--dim);font-size:.85rem;
-    line-height:1.6;margin:26px 4px 14px;
+  .contact{text-align:center}
+  .contact p{color:var(--dim);font-size:.92rem;margin-bottom:12px}
+  .contact .mail{margin:16px 0 14px}
+  .contact .mail a{
+    display:inline-block;font-size:1.05rem;font-weight:600;
+    color:var(--accent);text-decoration:none;
+    padding:11px 22px;border:1px solid #f0a50055;border-radius:10px;
+    word-break:break-all;
   }
+  .contact .small{font-size:.82rem;margin-bottom:0}
   footer{text-align:center;color:var(--dim);font-size:.85rem;margin-top:8px}
 </style>
 </head>
@@ -142,12 +148,14 @@
   </div>
 
 
-  <p class="support">
-    Dieses Projekt entsteht in der Freizeit und bleibt kostenlos. Wenn es dir
-    nützt und du etwas zurückgeben möchtest, schreib mir
-    <a href="https://github.com/deffel6/anker-solix-display/issues">über GitHub</a> –
-    ich gebe dir dann gerne meine Mail-Adresse.
-  </p>
+  <div class="card contact">
+    <h2>Kontakt</h2>
+    <p>Fragen, Rückmeldungen oder ein Zählermodell, das noch nicht erkannt wird?</p>
+    <p class="mail"><a href="mailto:esp32.display@gmail.com">esp32.display@gmail.com</a></p>
+    <p class="small">Das Projekt entsteht in der Freizeit und bleibt kostenlos.
+    Fehlerberichte gehen auch
+    <a href="https://github.com/deffel6/anker-solix-display/issues">über GitHub</a>.</p>
+  </div>
 
   <footer>
     <a href="https://github.com/deffel6/anker-solix-display">Quelltext auf GitHub</a>
