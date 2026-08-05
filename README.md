@@ -158,6 +158,13 @@ einer Sitzung.
 - Getestet ausschließlich mit **Solarbank 3 Pro E2700 (A17C5)** und einem
   **Shelly EM3 (SHEM3)** als Netzzähler. Andere Modelle senden mit hoher
   Wahrscheinlichkeit andere Feldbelegungen.
+- **Der Firmwarestand der Solarbank spielt mit.** Die Feldzuordnung wurde an
+  einem Gerät mit `device_sw_version` v1.0.7.3 ermittelt. Anker veröffentlicht
+  das Protokoll nicht und versioniert es nicht — ein Update der Solarbank kann
+  Felder verschieben, ohne dass es angekündigt würde. Zeigt die Anzeige nach
+  einem Geräte-Update Unsinn, liegt es vermutlich daran; die
+  [Protokoll-Dokumentation](docs/mqtt-protokoll.md) beschreibt, wie sich das
+  mit der Summenprobe schnell nachweisen lässt.
 
 Rückmeldungen zu anderen Modellen sind willkommen — am hilfreichsten ist die
 `[NETZ]`- beziehungsweise `[INT]`-Ausgabe aus dem seriellen Monitor zusammen mit
