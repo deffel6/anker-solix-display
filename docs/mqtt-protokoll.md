@@ -1,12 +1,27 @@
 # Anker SOLIX MQTT-Protokoll
 
 Alles hier stammt aus eigenen Mitschnitten mit einer **Solarbank 3 Pro E2700
-(A17C5, Firmware v1.0.7.3)** und einem **Shelly EM3 (SHEM3)** als Netzzähler.
-Anker dokumentiert nichts davon. Andere Modelle senden vermutlich andere
-Feldbelegungen.
+(A17C5)** und einem **Shelly EM3 (SHEM3)** als Netzzähler. Anker dokumentiert
+nichts davon. Andere Modelle senden vermutlich andere Feldbelegungen.
 
 Belegte Felder sind mit ✔ markiert — sie wurden gegen die Anker-App oder über
 eine Summenprobe geprüft. Alles andere ist eine Vermutung.
+
+> ### Gilt nur für diesen Firmwarestand
+>
+> Die Zuordnung der Feldnummern wurde an einem Gerät mit **`device_sw_version`
+> v1.0.7.3** und **`version` v0.3.3.0** (aus `state_info`) ermittelt.
+>
+> Es gibt keine Zusage von Anker, dass diese Nummern stabil bleiben. Das
+> Protokoll ist unveröffentlicht und wird nicht versioniert — ein
+> Firmware-Update der Solarbank kann Felder verschieben, umdeuten oder
+> entfernen, ohne dass es irgendwo angekündigt würde. Dasselbe gilt für die
+> verwendeten API-Endpunkte.
+>
+> Praktisch heißt das: Zeigt die Anzeige nach einem Geräte-Update plötzlich
+> Unsinn, liegt der Fehler mit hoher Wahrscheinlichkeit hier und nicht im
+> Sketch. Die Summenprobe ist dann der schnellste Test — ergeben `0xc6` bis
+> `0xc9` nicht mehr zusammen `0xab`, hat sich die Belegung geändert.
 
 ## Zugang
 
