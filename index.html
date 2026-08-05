@@ -38,13 +38,19 @@
     margin-bottom:18px;
   }
   .warn{
-    border-left:3px solid #e05252;
-    padding:14px 16px;background:var(--card);
-    border-radius:0 8px 8px 0;color:var(--dim);font-size:.9rem;
-    margin-bottom:18px;line-height:1.55;
+    border:1px solid #e0525244;
+    border-left:5px solid #e05252;
+    padding:18px 20px;
+    background:linear-gradient(180deg,#e0525218,transparent 70%),var(--card);
+    border-radius:12px;color:var(--fg);font-size:.92rem;
+    margin-bottom:20px;line-height:1.6;
   }
+  .warn h3{
+    font-size:1rem;color:#e05252;margin-bottom:10px;letter-spacing:.01em;
+  }
+  .warn p{margin-bottom:10px;color:var(--dim)}
+  .warn p:last-child{margin-bottom:0}
   .warn strong{color:var(--fg)}
-  .warn a{display:inline-block;margin-top:6px}
   table{width:100%;border-collapse:collapse;font-size:.9rem}
   td{padding:6px 0;border-bottom:1px solid var(--line)}
   td:last-child{text-align:right;color:var(--dim)}
@@ -59,6 +65,20 @@
 
   <h1>⚡ Anker Solix Display</h1>
   <p class="sub">Firmware direkt aus dem Browser auf den ESP32-C3 spielen.</p>
+
+  <div class="warn">
+    <h3>⚠️ Ohne Gewähr bei neuerer Solarbank-Firmware</h3>
+    <p>Anker veröffentlicht die hier genutzte Schnittstelle <strong>nicht</strong>
+    und versioniert sie <strong>nicht</strong>. Welche Zahl im Datenstrom welcher
+    Messgröße entspricht, wurde durch Mitlesen ermittelt — an einer Solarbank 3
+    Pro mit Firmware <strong>v1.0.7.3</strong>.</p>
+    <p>Ein Update deines Speichers kann diese Zuordnung jederzeit und ohne
+    Ankündigung verschieben. Dann zeigt das Display falsche Werte, obwohl an ihm
+    nichts kaputt ist. Ebenso können die verwendeten Anker-Schnittstellen
+    wegfallen.</p>
+    <p><a href="https://github.com/deffel6/anker-solix-display/blob/main/docs/mqtt-protokoll.md">So
+    lässt sich das nachweisen</a></p>
+  </div>
 
   <div class="note">
     Funktioniert nur in <strong>Chrome</strong> oder <strong>Edge</strong> auf
@@ -88,8 +108,10 @@
       <li>Der ESP32 spannt ein WLAN namens <strong>Anker-Display-Setup</strong> auf.</li>
       <li>Damit verbinden und im Browser <strong>192.168.4.1</strong> aufrufen.</li>
       <li>WLAN-Zugang und Anker-Konto eintragen, speichern.</li>
-      <li>Nach dem Neustart zeigt das Display eine IP-Adresse — die im Heimnetz
-          aufrufen und die Anlage auswählen.</li>
+      <li>Das Gerät wählt selbst eine Anlage und startet neu. Fertig.</li>
+      <li>Das Display zeigt danach eine IP-Adresse. Darüber ist es im Heimnetz
+          erreichbar — dort lassen sich die Anlage wechseln, die einzelnen
+          Panels ansehen und Einstellungen ändern.</li>
     </ol>
   </div>
 
@@ -100,6 +122,7 @@
       <tr><td>Akkustand</td><td>alle 3 s</td></tr>
       <tr><td>Akkuleistung mit Richtung</td><td>alle 3 s</td></tr>
       <tr><td>Netzbezug / Einspeisung</td><td>alle 3 s</td></tr>
+      <tr><td>Einzelne Panels</td><td>nur im Browser</td></tr>
     </table>
   </div>
 
@@ -114,15 +137,6 @@
     </table>
   </div>
 
-  <div class="warn">
-    <strong>Abhängig vom Firmwarestand der Solarbank.</strong>
-    Anker veröffentlicht die hier genutzte Schnittstelle nicht und versioniert
-    sie nicht. Die Zuordnung der Messwerte wurde an einer Solarbank mit
-    Firmware <strong>v1.0.7.3</strong> ermittelt — ein Update des Speichers kann
-    sie ohne Ankündigung verschieben. Zeigt die Anzeige danach unsinnige Werte,
-    liegt es vermutlich daran und nicht am Display.
-    <a href="https://github.com/deffel6/anker-solix-display/blob/main/docs/mqtt-protokoll.md">Wie man das nachweist</a>
-  </div>
 
   <footer>
     <a href="https://github.com/deffel6/anker-solix-display">Quelltext auf GitHub</a>
