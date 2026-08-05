@@ -1,5 +1,35 @@
 # Änderungen
 
+## 1.7.1 — 5. August 2026
+
+**Tagesertrag je Panel.** Die Weboberfläche zeigt neben der aktuellen Leistung
+jetzt auch, wie viele Kilowattstunden jedes Panel heute erzeugt hat, samt
+Summenzeile. Die Solarbank liefert nur Momentanwerte, der Ertrag wird deshalb
+selbst aufsummiert: Leistung mal verstrichene Zeit, bei rund drei Sekunden Takt
+genau genug.
+
+Zurückgesetzt wird beim Datumswechsel statt per Uhr — das greift auch, wenn das
+Gerät über Mitternacht aus war. Der Zwischenstand geht alle zehn Minuten ins
+Flash, damit ein Neustart am Nachmittag nicht den ganzen Vormittag verwirft, und
+wird beim Start nur übernommen, wenn es noch derselbe Tag ist.
+
+Bei Datenlücken über einer Minute — etwa nach einem WLAN-Ausfall — zählt der
+Sketch nicht weiter. Die zuletzt gesehene Leistung über eine unbekannte Lücke
+hochzurechnen wäre schlicht falsch; ein Loch im Zähler ist ehrlicher als eine
+erfundene Zahl. Es sind Schätzwerte aus Momentanleistungen, keine geeichten
+Zählerstände.
+
+**Schalter für die Protokollausgabe.** Ganz oben im Sketch steht jetzt
+`#define VERBOSE 1`. Auf `0` verstummen die wiederkehrenden Zeilen zu jeder
+MQTT-Nachricht; Start-, Fehler- und Zustandsmeldungen bleiben.
+
+Dabei aufgeräumt: Die Zeile `[RX] cmd=? seq=? ts=?` hat seit 1.2.2 nur
+Fragezeichen ausgegeben, weil die drei Werte Zahlen ohne Anführungszeichen sind
+und der verwendete Textsucher nur Zeichenketten findet. Und `ankerKeyExchange`
+ist entfernt — der Versuch, den Schlüsselaustausch der verschlüsselten API
+nachzubauen, wurde seit 1.2.0 nicht mehr aufgerufen und hätte den nächsten Leser
+auf eine falsche Fährte geschickt.
+
 ## 1.6.0 — 5. August 2026
 
 **Einzelne Panels auf der Weboberfläche.** Die Statusseite zeigt jetzt zusätzlich
