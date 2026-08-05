@@ -170,6 +170,15 @@ Rückmeldungen zu anderen Modellen sind willkommen — am hilfreichsten ist die
 `[NETZ]`- beziehungsweise `[INT]`-Ausgabe aus dem seriellen Monitor zusammen mit
 den Werten, die die App zur selben Zeit anzeigt.
 
+## Kontakt
+
+Fragen, Rückmeldungen oder ein Zählermodell, das noch nicht erkannt wird:
+**esp32.display@gmail.com**
+
+Fehlerberichte gerne auch als
+[Issue](https://github.com/deffel6/anker-solix-display/issues).
+Das Projekt entsteht in der Freizeit und bleibt kostenlos.
+
 ## Änderungen
 
 Siehe [CHANGELOG.md](CHANGELOG.md).
