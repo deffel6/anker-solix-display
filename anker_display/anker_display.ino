@@ -32,7 +32,20 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.6.0"
+#define FW_VERSION "1.7.1"
+
+// Ausfuehrliche Ausgaben im seriellen Monitor.
+//   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
+//   0 = nur Start, Fehler und Zustandswechsel
+// Start- und Fehlermeldungen bleiben in beiden Faellen erhalten, damit sich
+// ein Problem auch bei fest verbautem Geraet noch nachvollziehen laesst.
+#define VERBOSE 1
+
+#if VERBOSE
+  #define LOGF(...) Serial.printf(__VA_ARGS__)
+#else
+  #define LOGF(...) do{}while(0)
+#endif
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -145,6 +158,13 @@ static float  gGridScale = 1.0f;
 // Leistung der vier MPPT-Eingaenge (0xc6..0xc9). Nur fuer die Weboberflaeche;
 // auf dem 240x240-Display waere dafuer kein Platz.
 static float  gPvStr[4] = {0,0,0,0};
+// Tagesertrag je Panel in Wh. Entsteht durch Aufsummieren von Leistung mal
+// Zeit – die Solarbank liefert nur Momentanwerte, keine Zaehlerstaende je
+// Panel. Wird um Mitternacht zurueckgesetzt.
+static double gPvWh[4]  = {0,0,0,0};
+static int    gEnergyDay = -1;        // tm_yday, fuer den gerade gezaehlt wird
+static unsigned long gLastEnergyMs = 0;
+static unsigned long gLastEnergySave = 0;
 static WiFiClientSecure gMqttNet;
 static PubSubClient     gMqtt(gMqttNet);
 static float            gOutW          = 0;   // 0xad: Ausgang der Solarbank
@@ -691,6 +711,7 @@ void handleStatus(){
     "td:last-child{text-align:right;font-weight:600}"
     "tr:last-child td{border-bottom:none}"
     ".w{color:#f0a500}.g{color:#4caf50}.r{color:#f66}"
+    "td.m{text-align:right;color:#888;font-weight:400;width:5.5em}"
     "a.btn{display:block;padding:13px;background:#f0a500;color:#000;text-align:center;"
     "border-radius:10px;text-decoration:none;font-weight:700;margin-bottom:10px}"
     "a.sec{display:block;padding:11px;background:#222;color:#aaa;text-align:center;"
@@ -705,12 +726,14 @@ void handleStatus(){
     "<tr><td>Hausverbrauch</td><td>%.0f W</td></tr>"
     "</table>"
     "<h2 style='font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;"
-    "color:#f0a500;margin-bottom:8px'>Einzelne Panels</h2>"
+    "color:#f0a500;margin-bottom:8px'>Einzelne Panels &middot; heute</h2>"
     "<table style='margin-bottom:18px'>"
-    "<tr><td>Panel 1</td><td class='w'>%.0f W</td></tr>"
-    "<tr><td>Panel 2</td><td class='w'>%.0f W</td></tr>"
-    "<tr><td>Panel 3</td><td class='w'>%.0f W</td></tr>"
-    "<tr><td>Panel 4</td><td class='w'>%.0f W</td></tr>"
+    "<tr><td>Panel 1</td><td class='m'>%.0f W</td><td class='w'>%.2f kWh</td></tr>"
+    "<tr><td>Panel 2</td><td class='m'>%.0f W</td><td class='w'>%.2f kWh</td></tr>"
+    "<tr><td>Panel 3</td><td class='m'>%.0f W</td><td class='w'>%.2f kWh</td></tr>"
+    "<tr><td>Panel 4</td><td class='m'>%.0f W</td><td class='w'>%.2f kWh</td></tr>"
+    "<tr><td><b>Summe</b></td><td class='m'>%.0f W</td>"
+    "<td class='w'><b>%.2f kWh</b></td></tr>"
     "</table>"
     "<p style='color:#888;font-size:.8rem;margin-bottom:8px'>"
     "Netzwert falsch? Teiler f&uuml;r %s: "
@@ -728,7 +751,10 @@ void handleStatus(){
     gData.batt_in_w>0.5f?gData.batt_in_w:gData.batt_out_w,
     gData.grid_w>0.5f?"r":"g", fabsf(gData.grid_w),
     gData.home_w,
-    gPvStr[0], gPvStr[1], gPvStr[2], gPvStr[3],
+    gPvStr[0], gPvWh[0]/1000.0, gPvStr[1], gPvWh[1]/1000.0,
+    gPvStr[2], gPvWh[2]/1000.0, gPvStr[3], gPvWh[3]/1000.0,
+    gPvStr[0]+gPvStr[1]+gPvStr[2]+gPvStr[3],
+    (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale);
   server.send(200,"text/html; charset=utf-8",b);
 }
@@ -758,9 +784,71 @@ void startWebUi(){
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TAGESERTRAG JE PANEL
+// Die Solarbank liefert nur Momentanleistungen, deshalb wird selbst summiert:
+// Energie += Leistung * verstrichene Zeit. Zwischenstand alle 10 Minuten ins
+// NVS, damit ein Neustart am Nachmittag nicht den ganzen Vormittag verwirft.
+// ─────────────────────────────────────────────────────────────────────────────
+static void saveEnergy(){
+  prefs.begin("energy",false);
+  prefs.putInt("day",gEnergyDay);
+  for(int i=0;i<4;i++){
+    char k[4]; snprintf(k,sizeof(k),"p%d",i);
+    prefs.putFloat(k,(float)gPvWh[i]);
+  }
+  prefs.end();
+}
+
+static void loadEnergy(){
+  prefs.begin("energy",true);
+  gEnergyDay=prefs.getInt("day",-1);
+  for(int i=0;i<4;i++){
+    char k[4]; snprintf(k,sizeof(k),"p%d",i);
+    gPvWh[i]=prefs.getFloat(k,0);
+  }
+  prefs.end();
+  // Gespeicherten Stand nur uebernehmen, wenn es noch derselbe Tag ist
+  struct tm ti;
+  if(getLocalTime(&ti) && gEnergyDay!=ti.tm_yday){
+    for(int i=0;i<4;i++) gPvWh[i]=0;
+    gEnergyDay=ti.tm_yday;
+  }
+  Serial.printf("[Wh] Tagesstand %.0f/%.0f/%.0f/%.0f Wh\n",
+                gPvWh[0],gPvWh[1],gPvWh[2],gPvWh[3]);
+}
+
+static void integrateEnergy(){
+  struct tm ti;
+  if(!getLocalTime(&ti)) return;      // ohne Uhrzeit kein Tagesbezug moeglich
+  if(gEnergyDay!=ti.tm_yday){         // Tageswechsel um Mitternacht
+    Serial.printf("[Wh] Tageswechsel – Ertrag war %.0f/%.0f/%.0f/%.0f Wh\n",
+                  gPvWh[0],gPvWh[1],gPvWh[2],gPvWh[3]);
+    for(int i=0;i<4;i++) gPvWh[i]=0;
+    gEnergyDay=ti.tm_yday;
+    gLastEnergyMs=0;
+    saveEnergy();
+  }
+  unsigned long now=millis();
+  if(gLastEnergyMs){
+    unsigned long dt=now-gLastEnergyMs;   // Ueberlauf ist hier unkritisch
+    // Bei einer groesseren Luecke – etwa nach WLAN-Ausfall – nicht schaetzen:
+    // die aktuelle Leistung ueber eine Stunde hochzurechnen waere schlicht
+    // falsch. Lieber ein Loch im Zaehler als ein erfundener Wert.
+    if(dt<=60000){
+      double h=dt/3600000.0;
+      for(int i=0;i<4;i++) gPvWh[i]+=gPvStr[i]*h;
+    }
+  }
+  gLastEnergyMs=now;
+  if(now-gLastEnergySave>=600000){     // alle 10 Minuten sichern
+    gLastEnergySave=now;
+    saveEnergy();
+  }
+}
+
 // Vorwaertsdeklarationen (httpsPost steht schon weiter oben)
 bool ankerLogin();
-bool ankerKeyExchange();
 bool fetchMqttCreds();
 bool fetchDeviceInfo();
 bool mqttConnect();
@@ -1084,42 +1172,6 @@ bool ankerLogin(){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KEY EXCHANGE – POST /v1/openapi/oauth/key/exchange
-// Pflicht-Schritt vor verschluesselten Requests (sonst 463).
-// Blob-Format geraten: 16-stelliger us-Timestamp + 0x1F + 65B EC-Punkt
-// ─────────────────────────────────────────────────────────────────────────────
-bool ankerKeyExchange(){
-  Serial.println("[KEX] Key-Exchange...");
-  char tsUs[24];
-  snprintf(tsUs,sizeof(tsUs),"%llu",(unsigned long long)time(nullptr)*1000000ULL);
-  size_t tsLen=strlen(tsUs);
-  uint8_t blob[24+1+65];
-  memcpy(blob,tsUs,tsLen);
-  blob[tsLen]=0x1F;
-  memcpy(blob+tsLen+1,gClientPubKey,65);
-  size_t blobLen=tsLen+1+65;
-  String clientKeyB64=b64Encode(blob,blobLen);
-  Serial.printf("[KEX] blobLen=%u b64len=%u\n",(unsigned)blobLen,(unsigned)clientKeyB64.length());
-
-  DynamicJsonDocument doc(512);
-  doc["client_public_key"]=clientKeyB64;
-  String b; serializeJson(doc,b);
-  String resp;
-  int kexCode=rawPost("v1/openapi/oauth/key/exchange",b,resp);
-  Serial.printf("[KEX] HTTP %d, %u Bytes\n",kexCode,(unsigned)resp.length());
-  if(resp.length()) printLong("KEX",resp);
-  if(kexCode!=200) return false;
-
-  DynamicJsonDocument rd(4096);
-  if(deserializeJson(rd,resp)!=DeserializationError::Ok){Serial.println("[KEX] JSON-Fehler");return false;}
-  int code=rd["code"]|-1;
-  if(code!=0){Serial.printf("[KEX] Fehler %d: %s\n",code,rd["msg"].as<const char*>());return false;}
-  String srvKey=rd["data"]["server_public_key"].as<String>();
-  Serial.printf("[KEX] server_public_key len=%u\n",(unsigned)srvKey.length());
-  return true;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // MQTT-INFO-TEST
 // get_user_mqtt_info ist ein normaler Endpunkt ohne algo_ecdh. Liefert er
 // Zertifikate, brauchen wir die Body-Verschluesselung ueberhaupt nicht:
@@ -1269,6 +1321,7 @@ static String unescapeJson(const String& s){
   return r;
 }
 
+#if VERBOSE
 static void hexDump(const uint8_t* d, unsigned len){
   const unsigned MAXDUMP=512;
   unsigned n=len<MAXDUMP?len:MAXDUMP;
@@ -1288,6 +1341,7 @@ static void hexDump(const uint8_t* d, unsigned len){
   }
   if(len>MAXDUMP) Serial.printf("... (%u Bytes gekuerzt)\n",len-MAXDUMP);
 }
+#endif
 
 // Dekodiert die param_info-Nutzlast und fuellt gData.
 // Rahmen und Feldkodierung siehe Kopfkommentar.
@@ -1348,9 +1402,10 @@ static bool parseParamInfo(const String& b64){
   }
   gData.valid=true;
   for(int k=0;k<4;k++) gPvStr[k]=str[k];
-  Serial.printf("[PV] %.0f W = %.0f+%.0f+%.0f+%.0f | Akku %.0f W | Aus %.0f W\n",
+  integrateEnergy();
+  LOGF("[PV] %.0f W = %.0f+%.0f+%.0f+%.0f | Akku %.0f W | Aus %.0f W\n",
                 solar,str[0],str[1],str[2],str[3],battW,outW);
-  Serial.printf("[INT] %s\n",ints.c_str());
+  LOGF("[INT] %s\n",ints.c_str());
   return true;
 }
 
@@ -1406,7 +1461,7 @@ static bool parseGridInfo(const String& b64){
   gData.home_w=gOutW+w;
   static uint32_t skip=0;
   if((skip++ % 4)==0)               // nicht bei jeder Nachricht loggen
-    Serial.printf("[NETZ] roh a8=%lu a9=%lu -> %.0f W %s | Haus %.0f W\n",
+    LOGF("[NETZ] roh a8=%lu a9=%lu -> %.0f W %s | Haus %.0f W\n",
                   (unsigned long)imp,(unsigned long)exp_,fabsf(w),
                   w>=0?"Bezug":"Einspeisung",gData.home_w);
   return true;
@@ -1419,9 +1474,9 @@ static void mqttCallback(char* topic, uint8_t* payload, unsigned int len){
   shortTopic = shortTopic?shortTopic+1:topic;
   // Absender anhand der Seriennummer im Topic bestimmen
   bool fromGrid = gGridSn.length() && strstr(topic,gGridSn.c_str())!=nullptr;
-  Serial.printf("\n[RX] #%lu %s %s (%u B)\n",
-                (unsigned long)gMqttRxCount, fromGrid?"ZAEHLER":"BANK",
-                shortTopic, len);
+  LOGF("\n[RX] #%lu %s %s (%u B)\n",
+       (unsigned long)gMqttRxCount, fromGrid?"ZAEHLER":"BANK",
+       shortTopic, len);
 
   String raw; raw.reserve(len+1);
   for(unsigned i=0;i<len;i++) raw+=(char)payload[i];
@@ -1429,24 +1484,26 @@ static void mqttCallback(char* topic, uint8_t* payload, unsigned int len){
   // Aeussere Huelle ist JSON -> inneren payload-String lesbar ausgeben
   int pi=raw.indexOf("\"payload\":\"");
   if(raw.startsWith("{")&&pi>=0){
-    Serial.printf("[RX] cmd=%s seq=%s ts=%s\n",
-      jsonStr(raw,"cmd").length()?jsonStr(raw,"cmd").c_str():"?",
-      jsonStr(raw,"msg_seq").length()?jsonStr(raw,"msg_seq").c_str():"?",
-      jsonStr(raw,"timestamp").length()?jsonStr(raw,"timestamp").c_str():"?");
+    // Die frueher hier stehende Zeile mit cmd/seq/ts ist entfallen: jsonStr
+    // liest nur Werte in Anfuehrungszeichen, diese drei sind aber Zahlen –
+    // sie hat also seit jeher nur Fragezeichen ausgegeben.
     int s=pi+11, e=raw.lastIndexOf("\"}");
     if(e>s){
       String inner=unescapeJson(raw.substring(s,e));
-      // "battery" in state_info ist NICHT der Ladestand – stand konstant auf
-      // 100, waehrend der Akku real bei 9 % lag. Nur zur Info ausgeben.
-      int bp=inner.indexOf("\"battery\":");
       // Leistungswerte stecken base64-kodiert im data-Feld
       String d=jsonStr(inner,"data");
-      if(d.length())      { if(fromGrid) parseGridInfo(d); else parseParamInfo(d); }
-      else if(bp<0)       printLong("DATA",inner);
+      if(d.length()) { if(fromGrid) parseGridInfo(d); else parseParamInfo(d); }
+#if VERBOSE
+      // Klartext-Nachrichten ausgeben. Achtung: das dort enthaltene Feld
+      // "battery" ist NICHT der Ladestand – es stand konstant auf 100,
+      // waehrend der Akku real bei 9 % lag. Der Ladestand ist 0xa3.
+      else if(inner.indexOf("\"battery\":")<0) printLong("DATA",inner);
+#endif
     }
-  } else {
-    hexDump(payload,len);
   }
+#if VERBOSE
+  else hexDump(payload,len);   // unbekanntes Format – nur beim Mitlesen noetig
+#endif
 }
 
 // ── Echtzeit-Trigger ────────────────────────────────────────────────────────
@@ -1494,7 +1551,9 @@ void sendRealtimeTrigger(uint16_t timeoutSec){
     "\",\"device_sn\":\""+gDevSn+"\"},\"payload\":\""+innerEsc+"\"}";
   String topic="cmd/anker_power/"+gDevPn+"/"+gDevSn+"/req";
   Serial.printf("\n[TRG] -> %s (%u B)\n",topic.c_str(),(unsigned)msg.length());
+#if VERBOSE
   printLong("TRG",msg);
+#endif
   bool ok=gMqtt.publish(topic.c_str(),msg.c_str());
   Serial.printf("[TRG] publish %s\n",ok?"OK":"FEHLGESCHLAGEN");
 }
@@ -1721,6 +1780,7 @@ void setup(){
   struct tm ti; int ntpTries=0;
   while(!getLocalTime(&ti)&&ntpTries<20){delay(500);Serial.print(".");ntpTries++;}
   Serial.println(ntpTries<20?" OK":" Timeout");
+  loadEnergy();   // Tagesertrag fortsetzen, wenn es noch derselbe Tag ist
 
   dispCenter(110,"ECDH Init...",C_GRAY,&fonts::FreeSans9pt7b);
   if(!ecdhInit()){dispMsg("ECDH Fehler","Neustart...",C_RED,0);delay(3000);ESP.restart();return;}
