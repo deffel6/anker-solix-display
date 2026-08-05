@@ -72,9 +72,15 @@ Anlage zurück; über die Weboberfläche lässt sich jederzeit umstellen.
 Im laufenden Betrieb ist das Display im Heimnetz über seine IP-Adresse
 erreichbar. Sie steht beim Booten kurz auf dem Bildschirm und im seriellen
 Monitor. Die Seite zeigt die aktuellen Messwerte und aktualisiert sich alle
-zehn Sekunden — darunter auch die **Leistung der vier MPPT-Eingänge einzeln**,
-an der sich ein verschattetes oder ausgefallenes Panel erkennen lässt. Auf dem
-Display selbst erscheinen sie nicht, dort fehlt der Platz.
+zehn Sekunden — darunter auch die **Leistung der vier MPPT-Eingänge einzeln**
+samt **Tagesertrag in kWh**, an dem sich ein verschattetes oder ausgefallenes
+Panel erkennen lässt. Auf dem Display selbst erscheinen sie nicht, dort fehlt
+der Platz.
+
+Der Tagesertrag wird aus den Momentanleistungen aufsummiert, weil die Solarbank
+keine Zählerstände je Panel liefert. Um Mitternacht beginnt er neu. Es sind
+Schätzwerte, keine geeichten Zählerstände — nach längeren Verbindungslücken
+fehlt der Teil, den das Gerät nicht gesehen hat.
 
 Darüber lässt sich außerdem
 
