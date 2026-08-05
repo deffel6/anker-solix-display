@@ -177,7 +177,9 @@ Fragen, Rückmeldungen oder ein Zählermodell, das noch nicht erkannt wird:
 
 Fehlerberichte gerne auch als
 [Issue](https://github.com/deffel6/anker-solix-display/issues).
-Das Projekt entsteht in der Freizeit und bleibt kostenlos.
+
+Das Projekt entsteht in der Freizeit und bleibt kostenlos. Wer etwas dazugeben
+möchte, schreibt einfach an dieselbe Adresse.
 
 ## Änderungen
 
