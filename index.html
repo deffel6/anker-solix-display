@@ -37,6 +37,14 @@
     border-radius:0 8px 8px 0;color:var(--dim);font-size:.9rem;
     margin-bottom:18px;
   }
+  .warn{
+    border-left:3px solid #e05252;
+    padding:14px 16px;background:var(--card);
+    border-radius:0 8px 8px 0;color:var(--dim);font-size:.9rem;
+    margin-bottom:18px;line-height:1.55;
+  }
+  .warn strong{color:var(--fg)}
+  .warn a{display:inline-block;margin-top:6px}
   table{width:100%;border-collapse:collapse;font-size:.9rem}
   td{padding:6px 0;border-bottom:1px solid var(--line)}
   td:last-child{text-align:right;color:var(--dim)}
@@ -101,8 +109,19 @@
       <tr><td>Board</td><td>ESP32-C3</td></tr>
       <tr><td>Display</td><td>GC9A01A, 240×240 rund</td></tr>
       <tr><td>Speicher</td><td>Solarbank 3 Pro E2700 (A17C5)</td></tr>
+      <tr><td>Solarbank-Firmware</td><td>v1.0.7.3</td></tr>
       <tr><td>Netzzähler</td><td>Shelly EM3 (SHEM3)</td></tr>
     </table>
+  </div>
+
+  <div class="warn">
+    <strong>Abhängig vom Firmwarestand der Solarbank.</strong>
+    Anker veröffentlicht die hier genutzte Schnittstelle nicht und versioniert
+    sie nicht. Die Zuordnung der Messwerte wurde an einer Solarbank mit
+    Firmware <strong>v1.0.7.3</strong> ermittelt — ein Update des Speichers kann
+    sie ohne Ankündigung verschieben. Zeigt die Anzeige danach unsinnige Werte,
+    liegt es vermutlich daran und nicht am Display.
+    <a href="https://github.com/deffel6/anker-solix-display/blob/main/docs/mqtt-protokoll.md">Wie man das nachweist</a>
   </div>
 
   <footer>
