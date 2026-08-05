@@ -72,7 +72,11 @@ Anlage zurück; über die Weboberfläche lässt sich jederzeit umstellen.
 Im laufenden Betrieb ist das Display im Heimnetz über seine IP-Adresse
 erreichbar. Sie steht beim Booten kurz auf dem Bildschirm und im seriellen
 Monitor. Die Seite zeigt die aktuellen Messwerte und aktualisiert sich alle
-zehn Sekunden. Darüber lässt sich außerdem
+zehn Sekunden — darunter auch die **Leistung der vier MPPT-Eingänge einzeln**,
+an der sich ein verschattetes oder ausgefallenes Panel erkennen lässt. Auf dem
+Display selbst erscheinen sie nicht, dort fehlt der Platz.
+
+Darüber lässt sich außerdem
 
 - die **Anlage wechseln**, falls die automatische Wahl nicht die gewünschte
   getroffen hat,

@@ -1,5 +1,16 @@
 # Änderungen
 
+## 1.6.0 — 5. August 2026
+
+**Einzelne Panels auf der Weboberfläche.** Die Statusseite zeigt jetzt zusätzlich
+die Leistung der vier MPPT-Eingänge. Damit ist auf einen Blick erkennbar, ob ein
+Panel verschattet ist oder ausfällt — die Gesamtleistung allein verrät das nicht.
+
+Die Werte lagen schon vor: `parseParamInfo` liest die Felder `0xc6` bis `0xc9`
+seit der ersten MQTT-Fassung mit, hat sie aber nur ins Log geschrieben. Auf dem
+Display erscheinen sie bewusst nicht, dort ist auf 240×240 Pixeln kein Platz
+dafür.
+
 ## 1.5.0 — 4. August 2026
 
 **Netzzähler-Teiler richtet sich nach dem Gerät.** Der Teiler war fest auf 100

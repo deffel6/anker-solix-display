@@ -32,7 +32,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.5.0"
+#define FW_VERSION "1.6.0"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -142,6 +142,9 @@ static String gDevSn, gDevPn;                 // Solarbank der gewaehlten Anlage
 static String gGridSn, gGridPn;               // Netzzaehler
 // Teiler fuer die Rohwerte des Zaehlers – die Einheit ist geraeteabhaengig
 static float  gGridScale = 1.0f;
+// Leistung der vier MPPT-Eingaenge (0xc6..0xc9). Nur fuer die Weboberflaeche;
+// auf dem 240x240-Display waere dafuer kein Platz.
+static float  gPvStr[4] = {0,0,0,0};
 static WiFiClientSecure gMqttNet;
 static PubSubClient     gMqtt(gMqttNet);
 static float            gOutW          = 0;   // 0xad: Ausgang der Solarbank
@@ -669,7 +672,9 @@ void handleSelectSite(){
 void handleStatus(){
   // Grosszuegig bemessen: die Vorlage samt CSS liegt bei rund 1500 Zeichen,
   // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
-  char b[3200];
+  // static, nicht auf dem Stack: der Task-Stack ist knapp bemessen, und der
+  // Webserver ruft die Funktion ohnehin nie verschachtelt auf.
+  static char b[4096];
   const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
@@ -699,6 +704,14 @@ void handleStatus(){
     "<tr><td>Netz</td><td class='%s'>%.0f W</td></tr>"
     "<tr><td>Hausverbrauch</td><td>%.0f W</td></tr>"
     "</table>"
+    "<h2 style='font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;"
+    "color:#f0a500;margin-bottom:8px'>Einzelne Panels</h2>"
+    "<table style='margin-bottom:18px'>"
+    "<tr><td>Panel 1</td><td class='w'>%.0f W</td></tr>"
+    "<tr><td>Panel 2</td><td class='w'>%.0f W</td></tr>"
+    "<tr><td>Panel 3</td><td class='w'>%.0f W</td></tr>"
+    "<tr><td>Panel 4</td><td class='w'>%.0f W</td></tr>"
+    "</table>"
     "<p style='color:#888;font-size:.8rem;margin-bottom:8px'>"
     "Netzwert falsch? Teiler f&uuml;r %s: "
     "<a style='color:#f0a500' href='/gridscale?v=1'>1</a> &middot; "
@@ -715,6 +728,7 @@ void handleStatus(){
     gData.batt_in_w>0.5f?gData.batt_in_w:gData.batt_out_w,
     gData.grid_w>0.5f?"r":"g", fabsf(gData.grid_w),
     gData.home_w,
+    gPvStr[0], gPvStr[1], gPvStr[2], gPvStr[3],
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale);
   server.send(200,"text/html; charset=utf-8",b);
 }
@@ -1333,6 +1347,7 @@ static bool parseParamInfo(const String& b64){
     gData.battery_wh = soc/100.0f*BATT_CAP_WH;
   }
   gData.valid=true;
+  for(int k=0;k<4;k++) gPvStr[k]=str[k];
   Serial.printf("[PV] %.0f W = %.0f+%.0f+%.0f+%.0f | Akku %.0f W | Aus %.0f W\n",
                 solar,str[0],str[1],str[2],str[3],battW,outW);
   Serial.printf("[INT] %s\n",ints.c_str());
