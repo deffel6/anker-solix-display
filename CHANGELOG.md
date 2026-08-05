@@ -1,5 +1,22 @@
 # Änderungen
 
+## 1.5.0 — 4. August 2026
+
+**Netzzähler-Teiler richtet sich nach dem Gerät.** Der Teiler war fest auf 100
+verdrahtet — passend zu einem Shelly EM3, der Hundertstel-Watt meldet. Ein
+Nutzer mit einem Anker-Smartmeter bekam dadurch Werte um Faktor 100 zu klein:
+dessen Rohwert 250 entspricht 250 W, nicht 2,5 W. Die Einheit ist also
+modellabhängig, eine feste Konstante kann nicht für alle stimmen.
+
+Der Teiler wird jetzt aus `device_pn` abgeleitet (`SHEM*` → 100, sonst → 1) und
+lässt sich auf der Statusseite mit einem Klick auf 1, 10, 100 oder 1000
+umstellen. Die Einstellung liegt im NVS und überlebt Neustarts. Damit kann
+jeder seinen Zähler selbst geradeziehen, ohne dass jedes Modell bekannt sein
+muss — die Automatik erspart nur den meisten Leuten den Klick.
+
+Die Statusseite zeigt außerdem den erkannten Zählertyp und den aktiven Teiler
+an. Ohne diese Anzeige sieht man nicht, worauf das Gerät gerade steht.
+
 ## 1.4.2 — 4. August 2026
 
 **Anlage wird nach Erreichbarkeit gewählt.** Bisher nahm die automatische
