@@ -84,6 +84,27 @@ Das Anker-Passwort wird verschlüsselt an Anker übertragen (ECDH plus AES, so w
 die App es macht) und liegt lokal im NVS-Flash des ESP32. Es verlässt das Gerät
 nur Richtung Anker.
 
+## Wenn der Netzwert nicht stimmt
+
+Zeigt das Display beim Netz einen Wert, der um Faktor 100 oder 1000 daneben
+liegt, ist der Teiler für deinen Zähler falsch. Ursache: Die Zähler melden ihre
+Rohwerte in unterschiedlichen Einheiten, und wir kennen bisher nur zwei
+Modelle.
+
+Zu beheben ohne neu zu flashen: die IP des Displays im Browser aufrufen. Unten
+auf der Statusseite steht der erkannte Zählertyp mit dem aktiven Teiler, dazu
+die Auswahl **1 · 10 · 100 · 1000**. Der richtige Wert ist der, bei dem die
+Anzeige zu deinem Stromzähler passt. Die Einstellung überlebt Neustarts.
+
+Im seriellen Monitor hilft die Zeile mit dem Rohwert beim Rechnen:
+
+```
+[NETZ] roh a8=90925 a9=0 -> 909 W Bezug | Haus 1345 W
+```
+
+Über eine Rückmeldung mit Zählermodell und passendem Teiler freue ich mich —
+dann kann die Automatik das Modell künftig selbst erkennen.
+
 ## Hardware
 
 Ein ESP32-C3 mit rundem GC9A01A-Display, wie er als fertiges Modul erhältlich
@@ -122,8 +143,11 @@ einer Sitzung.
 
 ## Was noch offen ist
 
-- Der Netzbezug wird mit dem Faktor `GRID_SCALE` (100) skaliert. Das passt zu
-  meinen Messungen, ist aber nur an einem Zählertyp geprüft.
+- Die Einheit des Netzzählers ist modellabhängig. Geprüft sind zwei Fälle:
+  Shelly EM3 meldet Hundertstel-Watt, der Anker-Smartmeter ganze Watt. Der
+  Sketch leitet den Teiler aus dem Gerätetyp ab und lässt ihn in der
+  Weboberfläche überschreiben — ob es Zähler mit noch anderen Einheiten gibt,
+  ist offen.
 - `"battery"` aus `state_info` sieht nach Ladestand aus, ist aber keiner —
   der echte Wert steckt in Feld `0xa3` der `param_info`. Siehe
   [Protokoll-Dokumentation](docs/mqtt-protokoll.md).

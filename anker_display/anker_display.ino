@@ -32,7 +32,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.4.2"
+#define FW_VERSION "1.5.0"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -108,6 +108,9 @@ DNSServer   dns;
 struct Config {
   String wifiSsid, wifiPass, ankerEmail, ankerPass;
   String siteId, siteName;
+  // Teiler fuer die Rohwerte des Netzzaehlers. 0 = automatisch nach
+  // Geraetetyp; ein Wert >0 ueberschreibt die Automatik dauerhaft.
+  float  gridScale = 0;
 };
 static Config cfg;
 
@@ -136,7 +139,9 @@ static String gMqttHost, gMqttThing;          // Broker + Client-Kennung
 static String gMqttCert, gMqttKey, gMqttCa;   // PEM, echte Zeilenumbrueche
 static String gMqttCertId, gMqttUserId;       // fuer die Publish-client_id
 static String gDevSn, gDevPn;                 // Solarbank der gewaehlten Anlage
-static String gGridSn, gGridPn;               // Netzzaehler (Shelly EM3)
+static String gGridSn, gGridPn;               // Netzzaehler
+// Teiler fuer die Rohwerte des Zaehlers – die Einheit ist geraeteabhaengig
+static float  gGridScale = 1.0f;
 static WiFiClientSecure gMqttNet;
 static PubSubClient     gMqtt(gMqttNet);
 static float            gOutW          = 0;   // 0xad: Ausgang der Solarbank
@@ -398,6 +403,7 @@ void loadConfig() {
   cfg.ankerEmail=prefs.getString("email",""); cfg.ankerPass =prefs.getString("apass","");
   cfg.siteId    =prefs.getString("siteid","");
   cfg.siteName  =prefs.getString("sitename","");
+  cfg.gridScale =prefs.getFloat("gridscale",0);
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),BATT_CAP_WH);
@@ -407,6 +413,7 @@ void saveConfig() {
   prefs.putString("wssid",cfg.wifiSsid); prefs.putString("wpass",cfg.wifiPass);
   prefs.putString("email",cfg.ankerEmail); prefs.putString("apass",cfg.ankerPass);
   prefs.putString("siteid",cfg.siteId); prefs.putString("sitename",cfg.siteName);
+  prefs.putFloat("gridscale",cfg.gridScale);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -573,6 +580,7 @@ String httpsPost(const String& path, const String& body,
                  const String& token="", const String& gtoken="",
                  bool encrypt=false);
 static int rawPost(const String& path, const String& body, String& outResp);
+static void applyGridScale();
 void handleSave();
 
 // Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
@@ -661,7 +669,7 @@ void handleSelectSite(){
 void handleStatus(){
   // Grosszuegig bemessen: die Vorlage samt CSS liegt bei rund 1500 Zeichen,
   // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
-  char b[2600];
+  char b[3200];
   const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
@@ -691,6 +699,13 @@ void handleStatus(){
     "<tr><td>Netz</td><td class='%s'>%.0f W</td></tr>"
     "<tr><td>Hausverbrauch</td><td>%.0f W</td></tr>"
     "</table>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:8px'>"
+    "Netzwert falsch? Teiler f&uuml;r %s: "
+    "<a style='color:#f0a500' href='/gridscale?v=1'>1</a> &middot; "
+    "<a style='color:#f0a500' href='/gridscale?v=10'>10</a> &middot; "
+    "<a style='color:#f0a500' href='/gridscale?v=100'>100</a> &middot; "
+    "<a style='color:#f0a500' href='/gridscale?v=1000'>1000</a> "
+    "(aktuell %.0f)</p>"
     "<a class='btn' href='/sites'>Anlage wechseln</a>"
     "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
     "</div></body></html>",
@@ -699,8 +714,20 @@ void handleStatus(){
     gData.batt_out_w>0.5f?"r":"g",
     gData.batt_in_w>0.5f?gData.batt_in_w:gData.batt_out_w,
     gData.grid_w>0.5f?"r":"g", fabsf(gData.grid_w),
-    gData.home_w);
+    gData.home_w,
+    gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale);
   server.send(200,"text/html; charset=utf-8",b);
+}
+
+// Teiler des Netzzaehlers von Hand setzen. Noetig, weil die Einheit je
+// Geraet verschieden ist und wir nicht jeden Zaehler kennen koennen.
+void handleGridScale(){
+  float v=server.arg("v").toFloat();
+  if(v>0){
+    cfg.gridScale=v; saveConfig(); applyGridScale();
+    Serial.printf("[NETZ] Teiler von Hand auf %.0f gesetzt\n",v);
+  }
+  server.sendHeader("Location","/"); server.send(302);
 }
 
 // Webserver im Normalbetrieb starten, damit die Anlage ohne Reset und ohne
@@ -711,6 +738,7 @@ void startWebUi(){
   server.on("/save",       HTTP_POST, handleSave);
   server.on("/sites",      HTTP_GET,  handleSites);
   server.on("/selectsite", HTTP_GET,  handleSelectSite);
+  server.on("/gridscale",  HTTP_GET,  handleGridScale);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -1210,6 +1238,7 @@ bool fetchDeviceInfo(){
                     gGridPn.c_str(),gGridSn.c_str(),
                     jsonStr(g,"device_name").c_str());
   }
+  applyGridScale();   // Teiler haengt vom erkannten Zaehlertyp ab
   return gDevSn.length()&&gDevPn.length();
 }
 
@@ -1312,9 +1341,22 @@ static bool parseParamInfo(const String& b64){
 
 // Nachricht des Netzzaehlers: alle float-Felder ungefiltert ausgeben.
 // Welches davon der Netzbezug ist, zeigt der Abgleich mit der App.
-// Skalierung von a8/a9: Rohwert 90925 entsprach ~909 W Bezug.
-// Faktor bei Bedarf hier anpassen, der Rohwert steht im Log.
-#define GRID_SCALE 100.0f
+// Teiler fuer die Rohwerte a8/a9 des Netzzaehlers. Die Einheit haengt vom
+// Geraet ab: ein Shelly EM3 meldet Hundertstel-Watt (90925 = 909 W), der
+// Anker-Smartmeter dagegen ganze Watt (250 = 250 W). Eine feste Konstante
+// liefert deshalb bei einem Teil der Nutzer Werte um Faktor 100 daneben.
+// gGridScale wird beim Erkennen des Zaehlers gesetzt; cfg.gridScale > 0
+// ueberschreibt das dauerhaft und ist ueber die Weboberflaeche einstellbar.
+static void applyGridScale(){
+  if(cfg.gridScale>0){
+    gGridScale=cfg.gridScale;
+    Serial.printf("[NETZ] Teiler %.0f (manuell)\n",gGridScale);
+    return;
+  }
+  gGridScale = gGridPn.startsWith("SHEM") ? 100.0f : 1.0f;
+  Serial.printf("[NETZ] Teiler %.0f (automatisch fuer %s)\n",
+                gGridScale, gGridPn.length()?gGridPn.c_str():"unbekannt");
+}
 
 static bool parseGridInfo(const String& b64){
   size_t need=0;
@@ -1342,7 +1384,7 @@ static bool parseGridInfo(const String& b64){
   free(b);
   if(!have) return false;
 
-  float w=((float)imp-(float)exp_)/GRID_SCALE;
+  float w=((float)imp-(float)exp_)/gGridScale;
   gData.grid_w=w;
   // Hausverbrauch = Anlagenausgang (Solar + Akku) + Netz.
   // gOutW kommt aus 0xad der Solarbank, nicht aus der reinen Solarleistung.

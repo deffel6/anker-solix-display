@@ -194,9 +194,24 @@ der `param_info`.
 Weil `uint32` kein Vorzeichen kennt, liegen beide Richtungen in getrennten
 Feldern. Die tatsächliche Netzleistung ist `a8 - a9`.
 
-**Einheit:** Rohwert 90925 entsprach rund 909 W, also Hundertstel-Watt. Das ist
-an einem einzigen Zähler geprüft — im Sketch steht der Faktor als
-`GRID_SCALE`, falls er woanders abweicht.
+### Die Einheit hängt vom Zählermodell ab
+
+Das ist die wichtigste Stolperfalle in diesem Abschnitt. Zwei geprüfte Fälle:
+
+| Zähler | Rohwert `a8` | tatsächlich | Teiler |
+|---|---|---|---|
+| Shelly EM3 (`SHEM3`) | 90925 | ≈ 909 W | 100 |
+| Anker-Smartmeter | 250 | ≈ 250 W | 1 |
+
+Der Shelly meldet also Hundertstel-Watt, der Anker-Zähler ganze Watt. Ein fest
+eingebauter Teiler liefert damit zwangsläufig bei einem Teil der Nutzer Werte,
+die um Faktor 100 danebenliegen — genau das ist in den ersten Fassungen
+passiert.
+
+Der Sketch leitet den Teiler deshalb aus `device_pn` ab (`SHEM*` → 100, sonst
+→ 1) und lässt ihn in der Weboberfläche überschreiben. Ob es Zähler mit noch
+anderen Einheiten gibt, ist offen; die Umschaltmöglichkeit ist deshalb der
+eigentliche Verlass, die Automatik nur eine Bequemlichkeit.
 
 ## Fehlercodes der REST-API
 
