@@ -48,7 +48,9 @@ Bibliotheken:
 | [PubSubClient][mqtt] | MQTT |
 
 Dann `anker_display/anker_display.ino` öffnen, Board **ESP32C3 Dev Module**
-wählen und hochladen.
+wählen und unter *Werkzeuge → Partition Scheme* auf
+**Huge APP (3MB No OTA/1MB SPIFFS)** stellen — mit der Voreinstellung passt das
+Programm nicht in den Flash. Danach hochladen.
 
 [core]: https://github.com/espressif/arduino-esp32
 [gfx]: https://github.com/lovyan03/LovyanGFX
@@ -62,10 +64,11 @@ Damit verbinden, im Browser `192.168.4.1` aufrufen und dort WLAN-Zugang und
 Anker-Konto eintragen. Das Gerät wählt anschließend selbst eine Anlage und
 startet neu — bei nur einer Anlage ist die Einrichtung damit fertig.
 
-Bei mehreren Anlagen nimmt es die erste, in der ein **erreichbares** Gerät
-steht (`wifi_online`). Eine Anlage, deren Solarbank gerade offline ist, liefert
-schließlich keine Messwerte. Ist nichts erreichbar, fällt es auf die erste
-Anlage zurück; über die Weboberfläche lässt sich jederzeit umstellen.
+Bei **mehreren** Anlagen zeigt das Display stattdessen eine IP-Adresse mit dem
+Pfad `/sites` — dort wird ausgewählt. Automatisch entschieden wird bewusst
+nicht: Jede Regel dafür wäre beliebig, und schlimmer noch, ihr Ergebnis könnte
+sich später von allein ändern, wenn ein Gerät in einer anderen Anlage online
+geht.
 
 ## Weboberfläche
 
@@ -82,11 +85,17 @@ keine Zählerstände je Panel liefert. Um Mitternacht beginnt er neu. Es sind
 Schätzwerte, keine geeichten Zählerstände — nach längeren Verbindungslücken
 fehlt der Teil, den das Gerät nicht gesehen hat.
 
+Eine Unterseite zeigt die **Akkupacks einzeln**: Ladestand, Zellspannungen,
+Temperaturen und Seriennummer, dazu die Spreizung zwischen höchster und
+niedrigster Zelle — an ihr erkennt man eine schwächelnde Zelle deutlich früher
+als am Ladestand.
+
 Darüber lässt sich außerdem
 
 - die **Anlage wechseln**, falls die automatische Wahl nicht die gewünschte
   getroffen hat,
-- und die **Zugangsdaten ändern**, etwa nach einem WLAN-Wechsel.
+- die **Zugangsdaten ändern**, etwa nach einem WLAN-Wechsel,
+- und die **Akkukapazität** setzen, falls Erweiterungsbatterien verbaut sind.
 
 Beides ohne Reset und ohne neu zu flashen.
 
@@ -158,8 +167,10 @@ einer Sitzung.
   Sketch leitet den Teiler aus dem Gerätetyp ab und lässt ihn in der
   Weboberfläche überschreiben — ob es Zähler mit noch anderen Einheiten gibt,
   ist offen.
-- `"battery"` aus `state_info` sieht nach Ladestand aus, ist aber keiner —
-  der echte Wert steckt in Feld `0xa3` der `param_info`. Siehe
+- Zwei Fallen beim Ladestand: `"battery"` aus `state_info` sieht nach einem aus,
+  steht aber konstant auf 100. Und `0xa3` aus der `param_info` ist der Wert der
+  **Kopfstation**, nicht des Systems — bei mehreren Speichern weicht er von der
+  App ab. Der Systemwert entsteht aus den Packblöcken. Siehe
   [Protokoll-Dokumentation](docs/mqtt-protokoll.md).
 - Getestet ausschließlich mit **Solarbank 3 Pro E2700 (A17C5)** und einem
   **Shelly EM3 (SHEM3)** als Netzzähler. Andere Modelle senden mit hoher

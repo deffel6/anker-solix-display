@@ -18,7 +18,7 @@
 ║    typ:   00=String 01=u8 02=i16 03=u32 05=float32(LE)      ║
 ║                                                             ║
 ║  Belegte Felder – Solarbank A17C5:                          ║
-║    a3      Ladestand in %                                   ║
+║    a3      Ladestand der Kopfstation in %                   ║
 ║    ab, c2  Solarleistung gesamt (W)                         ║
 ║    ac      Akkuleistung (W), negativ = Entladen             ║
 ║    ad      Ausgangsleistung (W) = ab + ac                   ║
@@ -26,13 +26,17 @@
 ║  Netzzaehler SHEM3 – Werte als u32, nicht float:            ║
 ║    a8      Netzbezug, a9 Einspeisung (Hundertstel-Watt)     ║
 ║                                                             ║
+║  Ladestand je Akkupack: state_info Typ 0500, Bloecke a4 ff, ║
+║  Offset 36 in Zehntelprozent. Der Systemwert - den auch die ║
+║  App zeigt - ist deren Mittel, nicht a3.                    ║
+║                                                             ║
 ║  ACHTUNG: "battery" aus state_info ist NICHT der Ladestand  ║
-║  – der Wert steht konstant auf 100. Es gilt a3.             ║
+║  – der Wert steht konstant auf 100.                         ║
 ║                                                             ║
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.8.3"
+#define FW_VERSION "1.9.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -174,7 +178,8 @@ static double gPvWh[4]  = {0,0,0,0};
 struct PackInfo {
   bool     valid = false;
   uint8_t  idx   = 0;
-  uint16_t unknown12 = 0;   // Offset 12, Bedeutung noch offen
+  uint16_t soc10 = 0;       // Ladestand in Zehntelprozent (Offset 36)
+  uint16_t unknown12 = 0;   // Offset 12: je Pack konstant, Bedeutung offen
   uint16_t cell[5] = {0,0,0,0,0};   // Millivolt
   int16_t  temp[4] = {0,0,0,0};     // Zehntelgrad
   String   sn;
@@ -774,10 +779,10 @@ void handlePacks(){
            "kommt nur etwa alle zwei bis drei Minuten &ndash; nach einem "
            "Neustart dauert es also einen Moment.</p>");
   } else {
-    h += F("<p class='sub'>Zellspannungen und Temperaturen sind zugeordnet. "
-           "Der Wert bei Offset 12 und der Hexblock sind noch ungekl&auml;rt "
-           "&ndash; wer mag, vergleicht sie mit der Anker-App und meldet sich "
-           "unter esp32.display@gmail.com.</p>");
+    h += F("<p class='sub'>Ladestand, Zellspannungen und Temperaturen sind "
+           "gegen die Anker-App gepr&uuml;ft. Der Wert bei Offset 12 bleibt je "
+           "Pack konstant und ist ungekl&auml;rt &ndash; wer eine Idee hat, "
+           "meldet sich unter esp32.display@gmail.com.</p>");
     // Ueber alle Plaetze laufen: die Packs stehen nach Index einsortiert,
     // es koennen also Luecken bestehen, solange noch nicht jedes gemeldet hat.
     for(int p=0;p<MAX_PACKS;p++){
@@ -786,6 +791,7 @@ void handlePacks(){
       h += "<h2>Pack "+String(q.idx);
       if(q.sn.length()) h += " &middot; "+q.sn;
       h += "</h2><table>";
+      h += "<tr><td><b>Ladestand</b></td><td>"+String(q.soc10/10.0,1)+" %</td></tr>";
       uint32_t sum=0; uint16_t lo=65535, hi=0;
       for(int i=0;i<5;i++){
         h += "<tr><td>Zelle "+String(i+1)+"</td><td>"+String(q.cell[i])+" mV</td></tr>";
@@ -797,7 +803,7 @@ void handlePacks(){
       h += "<tr><td>Spreizung</td><td>"+String(hi-lo)+" mV</td></tr>";
       for(int i=0;i<4;i++)
         h += "<tr><td>Temperatur "+String(i+1)+"</td><td>"+String(q.temp[i]/10.0,1)+" &deg;C</td></tr>";
-      h += "<tr><td>Offset 12 (unbekannt)</td><td>"+String(q.unknown12)+"</td></tr>";
+      h += "<tr><td>Offset 12 (konstant je Pack)</td><td>"+String(q.unknown12)+"</td></tr>";
       h += "</table><div class='hex'>"+q.raw+"</div>";
     }
   }
@@ -1412,9 +1418,13 @@ static void hexDump(const uint8_t* d, unsigned len){
 // Ein Akkublock aus der Nachricht vom Typ 0500.
 // Feste Offsets, an drei Packs abgeglichen:
 //   0      laufender Index (1, 2, 3 …)
-//   12..13 unbekannt, u16 – bei den Mitschnitten 88 / 69 / 58
+//   12..13 je Pack konstant, Bedeutung offen (89 / 70 / 60 im Testgeraet)
 //   14..23 fuenf Zellspannungen, je u16 in Millivolt
 //   24..31 vier Temperaturen, je i16 in Zehntelgrad
+//   36..37 Ladestand in Zehntelprozent
+// Der Ladestand ist gegen die App geprueft: 252/260/258 entsprachen dort
+// 25/26/26 %. Offset 34 liegt nur wenige Zehntel daneben und haette bei zwei
+// von drei Packs falsch gerundet - deshalb ausdruecklich 36.
 // Die Seriennummer wird gesucht statt fest adressiert: sie steht am Ende,
 // aber die Blocklaenge unterscheidet sich je Pack.
 static void parsePackBlock(const uint8_t* d, uint8_t len){
@@ -1428,6 +1438,7 @@ static void parsePackBlock(const uint8_t* d, uint8_t len){
   PackInfo& p = gPacks[idx-1];
   p.idx = idx;
   memcpy(&p.unknown12, d+12, 2);
+  if(len>=38) memcpy(&p.soc10, d+36, 2);
   for(int i=0;i<5;i++) memcpy(&p.cell[i], d+14+i*2, 2);
   for(int i=0;i<4;i++) memcpy(&p.temp[i], d+24+i*2, 2);
   // Laengste zusammenhaengende Folge druckbarer Zeichen = Seriennummer
@@ -1443,8 +1454,8 @@ static void parsePackBlock(const uint8_t* d, uint8_t len){
   p.valid = true;
   gPackCount=0;
   for(int i=0;i<MAX_PACKS;i++) if(gPacks[i].valid) gPackCount++;
-  LOGF("[PACK] %u  Zellen %u/%u/%u/%u/%u mV  Temp %.1f/%.1f/%.1f/%.1f C  %s\n",
-       p.idx, p.cell[0],p.cell[1],p.cell[2],p.cell[3],p.cell[4],
+  LOGF("[PACK] %u  %.1f%%  Zellen %u/%u/%u/%u/%u mV  Temp %.1f/%.1f/%.1f/%.1f C  %s\n",
+       p.idx, p.soc10/10.0, p.cell[0],p.cell[1],p.cell[2],p.cell[3],p.cell[4],
        p.temp[0]/10.0, p.temp[1]/10.0, p.temp[2]/10.0, p.temp[3]/10.0,
        p.sn.c_str());
 }
@@ -1514,9 +1525,10 @@ static bool parseParamInfo(const String& b64){
     if(ln==2 && d[0]==0x01 && d[1]<=100){
       char t[16]; snprintf(t,sizeof(t),"%02x=%u ",tag,d[1]);
       ints+=t;
-      // 0xa3 ist der Ladestand. Bestaetigt durch Abgleich mit der App und
-      // dadurch, dass der Wert beim Entladen mitlaeuft, waehrend 0xa6 - der
-      // andere Kandidat mit demselben Anfangswert - stehenblieb.
+      // 0xa3 ist der Ladestand der KOPFSTATION, nicht des Gesamtsystems.
+      // Bei mehreren Speichern weicht er von dem ab, was die App zeigt.
+      // Liegen Packdaten vor, wird er weiter unten ueberschrieben; bis dahin
+      // ist er die beste verfuegbare Angabe.
       if(tag==0xa3) soc=d[1];
     }
     i+=2+ln;
@@ -1529,6 +1541,20 @@ static bool parseParamInfo(const String& b64){
     return false;
   }
 
+  // Ladestand des Gesamtsystems statt nur der Kopfstation. 0xa3 meldet nur
+  // die Haupteinheit; die App zeigt den Systemwert. Solange die Packdaten
+  // noch nicht eingetroffen sind, bleibt 0xa3 die beste verfuegbare Angabe.
+  //
+  // Gemittelt wird ungewichtet. Die Kapazitaeten der einzelnen Packs stehen
+  // nicht im Datenstrom, und solange sie aehnlich weit geladen sind - der
+  // Normalfall bei einem ausbalancierten System - liegt der Unterschied zur
+  // kapazitaetsgewichteten Rechnung unter einem Prozentpunkt.
+  {
+    int n=0; float sum=0;
+    for(int k=0;k<MAX_PACKS;k++)
+      if(gPacks[k].valid && gPacks[k].soc10){ sum+=gPacks[k].soc10/10.0f; n++; }
+    if(n) soc=(int)(sum/n+0.5f);
+  }
   gData.solar_w    = solar;
   gData.batt_in_w  = battW>0? battW : 0;
   gData.batt_out_w = battW<0? -battW: 0;
