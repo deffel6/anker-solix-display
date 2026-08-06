@@ -1,5 +1,42 @@
 # Änderungen
 
+## 1.9.0 — 6. August 2026
+
+**Akkupacks im Detail.** Neue Seite `/akkus` mit Ladestand, den fünf
+Zellspannungen, vier Temperaturen und der Seriennummer je Pack. Die Spreizung
+zwischen höchster und niedrigster Zelle steht mit dabei — sie zeigt eine
+davonlaufende Zelle deutlich früher an als der Ladestand.
+
+Die Daten stammen aus der `state_info`-Nachricht vom Typ 0500, die je Pack einen
+Block trägt. Sie kommt in wechselnden Größen und enthält nicht immer alle Packs,
+deshalb werden die Blöcke nach Index einsortiert und über mehrere Nachrichten
+gesammelt.
+
+**Das Display zeigt jetzt den Systemladestand.** Bisher stand dort `0xa3` — das
+ist der Wert der Kopfstation, nicht des Systems. Bei mehreren Speichern wich er
+von der App ab, bei einem Testgerät um bis zu acht Prozentpunkte. Jetzt wird über
+die Packs gemittelt. Ungewichtet, weil die Kapazität der einzelnen Packs nicht im
+Datenstrom steht; bei ähnlich geladenen Packs liegt der Unterschied zur
+kapazitätsgewichteten Rechnung unter einem Prozentpunkt.
+
+**Akkukapazität einstellbar.** Sie stand fest auf 2700 Wh. Wer Erweiterungs-
+batterien hat, bekam eine entsprechend zu niedrige Wattstundenanzeige; die
+Prozentzahl war nicht betroffen. Der Wert lässt sich auf der Statusseite setzen.
+
+**Automatische Anlagenwahl nur noch bei genau einer Anlage.** Die bisherige Regel
+„erste Anlage mit erreichbarem Gerät" hatte still auf eine andere Anlage
+umgeschaltet, als deren Solarbank online ging — tagelang unbemerkt, und eine
+ganze Messreihe verglich dadurch zwei verschiedene Anlagen miteinander. Bei
+mehreren Anlagen erscheint jetzt wieder die Auswahlseite. Eine Vorauswahl, die
+sich später von allein ändert, ist schlimmer als gar keine.
+
+**Hinweis zum Aktualisieren:** Diese Fassung braucht die Speicheraufteilung
+„Huge APP", weil das Programm über 1,3 MB gewachsen ist. Der Web-Installer
+liefert die passende Partitionstabelle mit. Der NVS-Bereich bleibt unverändert,
+Zugangsdaten und Einstellungen überleben das Update. Wer aus dem Quelltext baut,
+stellt in der Arduino IDE unter *Werkzeuge → Partition Scheme* auf
+„Huge APP (3MB No OTA/1MB SPIFFS)" um.
+
 ## 1.7.1 — 5. August 2026
 
 **Tagesertrag je Panel.** Die Weboberfläche zeigt neben der aktuellen Leistung

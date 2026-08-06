@@ -194,6 +194,64 @@ Die `state_info`-Nachricht enthält ein Klartext-JSON mit einem Feld `battery`:
 Akku real bei 9 % lag und sich weiter entlud. Der Ladestand steht in `0xa3`
 der `param_info`.
 
+## Solarbank A17C5 — `state_info`, Typ 0500
+
+Diese Nachricht trägt die Daten der einzelnen Akkupacks. Sie kommt selten, etwa
+zwei- bis dreimal in fünf Minuten, und in wechselnden Größen — nicht jede
+enthält alle Packs. Ein Parser muss die Blöcke deshalb nach Index **einsortieren
+und über mehrere Nachrichten sammeln**, statt die Liste je Nachricht neu zu
+füllen.
+
+Aufbau einer beobachteten Nachricht mit drei Packs:
+
+```
+len=711  a0:2/t01  a1:1/t32  a2:107/t04  a3:94/t04
+         a4:148/t04  a5:164/t04  a6:165/t04  aa:4/t04
+```
+
+`a4`, `a5`, `a6` … sind die Packblöcke, erkennbar an Typ `04` und einer Länge
+über 32 Byte. `a2` und `a3` enthalten Systemdaten, die noch nicht entschlüsselt
+sind.
+
+### Aufbau eines Packblocks
+
+Feste Offsets, an mehreren Aufnahmen und drei Packs geprüft:
+
+| Offset | Inhalt | |
+|---|---|---|
+| 0 | laufender Index (1, 2, 3 …) | ✔ |
+| 12–13 | u16, je Pack **konstant** — Bedeutung offen | |
+| 14–23 | fünf Zellspannungen, je u16 in Millivolt | ✔ |
+| 24–31 | vier Temperaturen, je i16 in Zehntelgrad | ✔ |
+| 36–37 | **Ladestand in Zehntelprozent** | ✔ |
+| Ende | Seriennummer als ASCII, mit Längenbyte davor | ✔ |
+
+Der Abgleich mit der App, alle drei Packs gleichzeitig:
+
+| App | Offset 36 | Temperatur App / Block |
+|---|---|---|
+| Host E2700 Pro: 25 % | 252 → 25,2 % | 25 °C / 25,4 °C |
+| BP1600: 26 % | 260 → 26,0 % | 23 °C / 23,0 °C |
+| BP2700: 26 % | 258 → 25,8 % | 23 °C / 23,7 °C |
+
+**Vorsicht bei Offset 34.** Dort steht ein sehr ähnlicher Wert — 248 / 252 / 254
+in derselben Aufnahme —, der bei zwei von drei Packs auf den falschen
+Prozentwert rundet. Ohne den Abgleich mit allen drei Packs gleichzeitig ist der
+Unterschied nicht zu erkennen.
+
+**Und Vorsicht bei Offset 12.** Die Werte dort (89 / 70 / 60 im Testgerät) sehen
+wie Ladestände aus und ergeben kapazitätsgewichtet sogar ungefähr den Wert, den
+die App anzeigt. Sie sind aber über Stunden konstant, während sich die Akkus
+entladen. Ein zufällig passender Mittelwert ist kein Beleg — erst die zeitliche
+Veränderung entscheidet.
+
+### Systemwert
+
+`0xa3` in der `param_info` ist der Ladestand der **Kopfstation**, nicht des
+Systems. Bei mehreren Speichern weicht er von dem ab, was die App zeigt. Der
+Systemwert entspricht dem Mittel über die Packs; kapazitätsgewichtet wäre
+genauer, aber die Kapazität der einzelnen Packs steht nicht im Datenstrom.
+
 ## Netzzähler SHEM3 — `param_info`, Typ 0405
 
 435 Byte. Alle Messwerte als `uint32`.
