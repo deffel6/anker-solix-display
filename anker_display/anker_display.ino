@@ -32,7 +32,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.7.1"
+#define FW_VERSION "1.8.3"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -124,6 +124,9 @@ struct Config {
   // Teiler fuer die Rohwerte des Netzzaehlers. 0 = automatisch nach
   // Geraetetyp; ein Wert >0 ueberschreibt die Automatik dauerhaft.
   float  gridScale = 0;
+  // Nutzbare Gesamtkapazitaet aller Akkus in Wh. Nur fuer die Umrechnung
+  // Prozent -> Wattstunden; laesst sich in der Weboberflaeche setzen.
+  int    battWh = BATT_CAP_WH;
 };
 static Config cfg;
 
@@ -162,6 +165,25 @@ static float  gPvStr[4] = {0,0,0,0};
 // Zeit – die Solarbank liefert nur Momentanwerte, keine Zaehlerstaende je
 // Panel. Wird um Mitternacht zurueckgesetzt.
 static double gPvWh[4]  = {0,0,0,0};
+
+// ── Akkupacks ───────────────────────────────────────────────────────────────
+// Die state_info-Nachricht vom Typ 0500 enthaelt je Pack einen Block (a4, a5,
+// a6 …) mit Zellspannungen, Temperaturen und Seriennummer. Sie kommt selten,
+// etwa zweimal in fuenf Minuten – fuer Spannungen und Temperaturen reicht das.
+#define MAX_PACKS 6
+struct PackInfo {
+  bool     valid = false;
+  uint8_t  idx   = 0;
+  uint16_t unknown12 = 0;   // Offset 12, Bedeutung noch offen
+  uint16_t cell[5] = {0,0,0,0,0};   // Millivolt
+  int16_t  temp[4] = {0,0,0,0};     // Zehntelgrad
+  String   sn;
+  String   raw;             // gesamter Block als Hex, fuer die Zuordnung
+};
+static PackInfo gPacks[MAX_PACKS];
+static int      gPackCount = 0;
+// Aufbau der zuletzt empfangenen 0500-Nachricht, fuer die Fehlersuche
+static String   gLastStateInfo;
 static int    gEnergyDay = -1;        // tm_yday, fuer den gerade gezaehlt wird
 static unsigned long gLastEnergyMs = 0;
 static unsigned long gLastEnergySave = 0;
@@ -174,9 +196,7 @@ static unsigned long    gMqttConnectedAt = 0; // Startpunkt der Lauschphase
 static unsigned long    gLastTrigger   = 0;
 static bool             gTriggerArmed  = false;
 
-// sns: Seriennummern der Geraete dieser Anlage, mit Komma verkettet.
-// Damit laesst sich pruefen, ob eine Anlage ein erreichbares Geraet hat.
-struct SiteEntry { String id; String name; String sns; };
+struct SiteEntry { String id; String name; };
 static SiteEntry gSiteList[10];
 static int       gSiteCount = 0;
 
@@ -427,9 +447,10 @@ void loadConfig() {
   cfg.siteId    =prefs.getString("siteid","");
   cfg.siteName  =prefs.getString("sitename","");
   cfg.gridScale =prefs.getFloat("gridscale",0);
+  cfg.battWh    =prefs.getInt("battwh",BATT_CAP_WH);
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
-    cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),BATT_CAP_WH);
+    cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
 }
 void saveConfig() {
   prefs.begin("anker",false);
@@ -437,6 +458,7 @@ void saveConfig() {
   prefs.putString("email",cfg.ankerEmail); prefs.putString("apass",cfg.ankerPass);
   prefs.putString("siteid",cfg.siteId); prefs.putString("sitename",cfg.siteName);
   prefs.putFloat("gridscale",cfg.gridScale);
+  prefs.putInt("battwh",cfg.battWh);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -619,59 +641,10 @@ bool loadSiteList(){
     if(gSiteCount>=10) break;
     gSiteList[gSiteCount].id  =s["site_id"].as<String>();
     gSiteList[gSiteCount].name=s["site_name"].as<String>();
-    gSiteList[gSiteCount].sns ="";
-    for(auto d:s["site_device_list"].as<JsonArray>())
-      gSiteList[gSiteCount].sns += d["device_sn"].as<String>()+",";
     gSiteCount++;
   }
   Serial.printf("[Web] %d Anlagen geladen\n",gSiteCount);
   return gSiteCount>0;
-}
-
-// Index der ersten Anlage mit einem erreichbaren Geraet.
-// get_relate_and_bind_devices meldet je Geraet wifi_online; eine Anlage,
-// deren Solarbank offline steht, liefert keine Messwerte und waere eine
-// schlechte Vorauswahl. Faellt auf 0 zurueck, wenn nichts erreichbar ist.
-int firstOnlineSite(){
-  String resp;
-  if(rawPost("power_service/v1/app/get_relate_and_bind_devices","{}",resp)!=200)
-    return 0;
-  // Seriennummern der erreichbaren Geraete einsammeln
-  String online;
-  int i=0;
-  while(true){
-    int d=resp.indexOf("\"device_sn\":\"",i);
-    if(d<0) break;
-    d+=13;
-    int e=resp.indexOf('"',d);
-    if(e<0) break;
-    String sn=resp.substring(d,e);
-    // wifi_online steht im selben Objekt, also vor der naechsten Seriennummer
-    int nxt=resp.indexOf("\"device_sn\":\"",e);
-    String chunk = (nxt<0) ? resp.substring(e) : resp.substring(e,nxt);
-    if(chunk.indexOf("\"wifi_online\":true")>=0) online += sn+",";
-    i=e;
-  }
-  if(online.isEmpty()){
-    Serial.println("[Site] kein Geraet erreichbar – nehme die erste Anlage");
-    return 0;
-  }
-  for(int k=0;k<gSiteCount;k++){
-    int j=0;
-    while(j<(int)gSiteList[k].sns.length()){
-      int c=gSiteList[k].sns.indexOf(',',j);
-      if(c<0) break;
-      String sn=gSiteList[k].sns.substring(j,c);
-      if(sn.length() && online.indexOf(sn+",")>=0){
-        Serial.printf("[Site] %s ist erreichbar (%s)\n",
-                      gSiteList[k].name.c_str(),sn.c_str());
-        return k;
-      }
-      j=c+1;
-    }
-  }
-  Serial.println("[Site] keine Anlage mit erreichbarem Geraet – nehme die erste");
-  return 0;
 }
 
 void handleSites(){
@@ -742,7 +715,16 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/gridscale?v=100'>100</a> &middot; "
     "<a style='color:#f0a500' href='/gridscale?v=1000'>1000</a> "
     "(aktuell %.0f)</p>"
-    "<a class='btn' href='/sites'>Anlage wechseln</a>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Akkukapazit&auml;t gesamt: "
+    "<form style='display:inline' action='/battwh'>"
+    "<input name='v' type='number' value='%d' min='100' max='60000' step='100' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> Wh "
+    "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
+    "color:#f0a500;cursor:pointer'>setzen</button></form></p>"
+    "<a class='btn' href='/akkus'>Akkupacks im Detail</a>"
+    "<a class='sec' href='/sites'>Anlage wechseln</a>"
     "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
     "</div></body></html>",
     cfg.siteName.c_str(), cfg.siteName.c_str(), mq, FW_VERSION,
@@ -755,12 +737,91 @@ void handleStatus(){
     gPvStr[2], gPvWh[2]/1000.0, gPvStr[3], gPvWh[3]/1000.0,
     gPvStr[0]+gPvStr[1]+gPvStr[2]+gPvStr[3],
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
-    gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale);
+    gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
+    cfg.battWh);
   server.send(200,"text/html; charset=utf-8",b);
+}
+
+// Detailseite der Akkupacks. Bewusst mit allen Rohdaten: welcher Wert welche
+// Bedeutung hat, ist nur teilweise geklaert – der Hexblock erlaubt den
+// Abgleich mit der App, ohne dass dafuer neu geflasht werden muss.
+void handlePacks(){
+  String h;
+  h.reserve(4096);
+  h += F("<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
+         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+         "<meta http-equiv='refresh' content='30'>"
+         "<title>Akkupacks</title><style>"
+         "*{box-sizing:border-box;margin:0;padding:0}"
+         "body{font-family:-apple-system,sans-serif;background:#0a0a0a;color:#eee;"
+         "display:flex;justify-content:center;padding:20px}"
+         ".card{background:#1a1a1a;border-radius:16px;padding:24px;width:100%;max-width:560px}"
+         "h1{font-size:1.25rem;margin-bottom:18px}"
+         "h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;"
+         "color:#f0a500;margin:20px 0 8px}"
+         "table{width:100%;border-collapse:collapse;margin-bottom:10px}"
+         "td{padding:7px 0;border-bottom:1px solid #262626;font-size:.9rem}"
+         "td:last-child{text-align:right;font-weight:600}"
+         "tr:last-child td{border-bottom:none}"
+         ".hex{font-family:ui-monospace,Menlo,monospace;font-size:.62rem;"
+         "color:#666;word-break:break-all;line-height:1.5;margin-bottom:6px}"
+         ".sub{color:#888;font-size:.85rem;margin-bottom:18px;line-height:1.55}"
+         "a{color:#f0a500}</style></head><body><div class='card'>"
+         "<h1>&#128267; Akkupacks</h1>");
+
+  if(gPackCount==0){
+    h += F("<p class='sub'>Noch keine Daten. Die Nachricht mit den Packdaten "
+           "kommt nur etwa alle zwei bis drei Minuten &ndash; nach einem "
+           "Neustart dauert es also einen Moment.</p>");
+  } else {
+    h += F("<p class='sub'>Zellspannungen und Temperaturen sind zugeordnet. "
+           "Der Wert bei Offset 12 und der Hexblock sind noch ungekl&auml;rt "
+           "&ndash; wer mag, vergleicht sie mit der Anker-App und meldet sich "
+           "unter esp32.display@gmail.com.</p>");
+    // Ueber alle Plaetze laufen: die Packs stehen nach Index einsortiert,
+    // es koennen also Luecken bestehen, solange noch nicht jedes gemeldet hat.
+    for(int p=0;p<MAX_PACKS;p++){
+      PackInfo& q=gPacks[p];
+      if(!q.valid) continue;
+      h += "<h2>Pack "+String(q.idx);
+      if(q.sn.length()) h += " &middot; "+q.sn;
+      h += "</h2><table>";
+      uint32_t sum=0; uint16_t lo=65535, hi=0;
+      for(int i=0;i<5;i++){
+        h += "<tr><td>Zelle "+String(i+1)+"</td><td>"+String(q.cell[i])+" mV</td></tr>";
+        sum+=q.cell[i];
+        if(q.cell[i]<lo) lo=q.cell[i];
+        if(q.cell[i]>hi) hi=q.cell[i];
+      }
+      h += "<tr><td>Summe</td><td>"+String(sum/1000.0,2)+" V</td></tr>";
+      h += "<tr><td>Spreizung</td><td>"+String(hi-lo)+" mV</td></tr>";
+      for(int i=0;i<4;i++)
+        h += "<tr><td>Temperatur "+String(i+1)+"</td><td>"+String(q.temp[i]/10.0,1)+" &deg;C</td></tr>";
+      h += "<tr><td>Offset 12 (unbekannt)</td><td>"+String(q.unknown12)+"</td></tr>";
+      h += "</table><div class='hex'>"+q.raw+"</div>";
+    }
+  }
+  h += F("<h2>Aufbau der letzten Nachricht</h2>");
+  h += "<div class='hex'>" + (gLastStateInfo.length()?gLastStateInfo:String("noch keine empfangen")) + "</div>";
+  h += F("<p class='sub' style='margin-top:10px'>Jeder Eintrag ist "
+         "<i>tag:laenge/typ</i>. Packbloecke haben Typ 04 und sind laenger "
+         "als 32 Byte.</p>");
+  h += F("<p style='margin-top:18px'><a href='/'>&larr; zur&uuml;ck</a></p>"
+         "</div></body></html>");
+  server.send(200,"text/html; charset=utf-8",h);
 }
 
 // Teiler des Netzzaehlers von Hand setzen. Noetig, weil die Einheit je
 // Geraet verschieden ist und wir nicht jeden Zaehler kennen koennen.
+void handleBattWh(){
+  int v=server.arg("v").toInt();
+  if(v>=100 && v<=60000){
+    cfg.battWh=v; saveConfig();
+    Serial.printf("[AKKU] Kapazitaet auf %d Wh gesetzt\n",v);
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 void handleGridScale(){
   float v=server.arg("v").toFloat();
   if(v>0){
@@ -779,6 +840,8 @@ void startWebUi(){
   server.on("/sites",      HTTP_GET,  handleSites);
   server.on("/selectsite", HTTP_GET,  handleSelectSite);
   server.on("/gridscale",  HTTP_GET,  handleGridScale);
+  server.on("/akkus",      HTTP_GET,  handlePacks);
+  server.on("/battwh",     HTTP_GET,  handleBattWh);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -918,32 +981,35 @@ void handleSave(){
           if(gSiteCount>=10) break;
           gSiteList[gSiteCount].id  =s["site_id"].as<String>();
           gSiteList[gSiteCount].name=s["site_name"].as<String>();
-          gSiteList[gSiteCount].sns ="";
-          for(auto d:s["site_device_list"].as<JsonArray>())
-            gSiteList[gSiteCount].sns += d["device_sn"].as<String>()+",";
           gSiteCount++;
         }
         Serial.printf("[Save] %d Sites\n",gSiteCount);
         // Erste Anlage automatisch uebernehmen – keine Auswahlseite mehr.
         // Ueber /sites laesst sich das nachtraeglich aendern.
-        if(gSiteCount>0){
-          int pick=firstOnlineSite();
-          cfg.siteId  =gSiteList[pick].id;
-          cfg.siteName=gSiteList[pick].name;
+        // Automatisch uebernehmen nur bei genau EINER Anlage. Bei mehreren
+        // muss der Mensch entscheiden: Jede Regel - "die erste", "die erste
+        // mit erreichbarem Geraet" - ist beliebig, und schlimmer noch, ihr
+        // Ergebnis kann sich spaeter von allein aendern, wenn ein Geraet in
+        // einer anderen Anlage online geht. Genau das ist passiert.
+        if(gSiteCount==1){
+          cfg.siteId  =gSiteList[0].id;
+          cfg.siteName=gSiteList[0].name;
           saveConfig();
-          Serial.printf("[Save] Anlage automatisch: %s\n",cfg.siteName.c_str());
+          Serial.printf("[Save] Einzige Anlage: %s\n",cfg.siteName.c_str());
           lcd.fillScreen(C_BLACK);
-          dispCenter( 70,"Anlage gewaehlt:",  C_GREEN, &fonts::FreeSansBold12pt7b);
-          dispCenter(105,cfg.siteName.c_str(),C_YELLOW,&fonts::FreeSans9pt7b);
-          if(gSiteCount>1){
-            // Nur die IP – die Weboberflaeche unter "/" hat seit 1.4.0
-            // eine Schaltflaeche zum Anlagenwechsel.
-            dispCenter(140,"Aendern im Browser:",C_GRAY,&fonts::FreeSans9pt7b);
-            dispCenter(160,myIp.c_str(),         C_YELLOW,&fonts::FreeSans9pt7b);
-          }
-          dispCenter(195,"Neustart in 3s...", C_GRAY,  &fonts::FreeSans9pt7b);
+          dispCenter( 80,"Anlage:",           C_GREEN, &fonts::FreeSansBold12pt7b);
+          dispCenter(115,cfg.siteName.c_str(),C_YELLOW,&fonts::FreeSans9pt7b);
+          dispCenter(160,"Neustart in 3s...", C_GRAY,  &fonts::FreeSans9pt7b);
           delay(3000);
           ESP.restart();
+        } else if(gSiteCount>1){
+          Serial.printf("[Save] %d Anlagen – Auswahl noetig\n",gSiteCount);
+          lcd.fillScreen(C_BLACK);
+          dispCenter( 55,"Anlage waehlen",     C_ORANGE,&fonts::FreeSansBold12pt7b);
+          dispCenter( 90,"Im Browser oeffnen:",C_GRAY,  &fonts::FreeSans9pt7b);
+          dispCenter(120,myIp.c_str(),         C_YELLOW,&fonts::FreeSansBold12pt7b);
+          dispCenter(150,"/sites",             C_YELLOW,&fonts::FreeSans9pt7b);
+          dispCenter(185,"(im Heimnetz)",      C_GRAY,  &fonts::FreeSans9pt7b);
         }
       }
     } else {
@@ -1343,6 +1409,46 @@ static void hexDump(const uint8_t* d, unsigned len){
 }
 #endif
 
+// Ein Akkublock aus der Nachricht vom Typ 0500.
+// Feste Offsets, an drei Packs abgeglichen:
+//   0      laufender Index (1, 2, 3 …)
+//   12..13 unbekannt, u16 – bei den Mitschnitten 88 / 69 / 58
+//   14..23 fuenf Zellspannungen, je u16 in Millivolt
+//   24..31 vier Temperaturen, je i16 in Zehntelgrad
+// Die Seriennummer wird gesucht statt fest adressiert: sie steht am Ende,
+// aber die Blocklaenge unterscheidet sich je Pack.
+static void parsePackBlock(const uint8_t* d, uint8_t len){
+  if(len<32) return;
+  // Nach Index einsortieren statt anzuhaengen: die 0500-Nachrichten kommen in
+  // verschiedenen Groessen und tragen offenbar nicht immer alle Packs. Wuerde
+  // die Liste je Nachricht neu gefuellt, loescht eine kleine Nachricht das,
+  // was eine grosse zuvor geliefert hat.
+  uint8_t idx = d[0];
+  if(idx<1 || idx>MAX_PACKS) return;
+  PackInfo& p = gPacks[idx-1];
+  p.idx = idx;
+  memcpy(&p.unknown12, d+12, 2);
+  for(int i=0;i<5;i++) memcpy(&p.cell[i], d+14+i*2, 2);
+  for(int i=0;i<4;i++) memcpy(&p.temp[i], d+24+i*2, 2);
+  // Laengste zusammenhaengende Folge druckbarer Zeichen = Seriennummer
+  p.sn=""; String cur;
+  for(uint8_t i=0;i<len;i++){
+    char c=(char)d[i];
+    if((c>='0'&&c<='9')||(c>='A'&&c<='Z')){ cur+=c; }
+    else { if(cur.length()>p.sn.length()) p.sn=cur; cur=""; }
+  }
+  if(cur.length()>p.sn.length()) p.sn=cur;
+  if(p.sn.length()<8) p.sn="";        // zu kurz, um eine Seriennummer zu sein
+  p.raw = bytesToHex(d,len);
+  p.valid = true;
+  gPackCount=0;
+  for(int i=0;i<MAX_PACKS;i++) if(gPacks[i].valid) gPackCount++;
+  LOGF("[PACK] %u  Zellen %u/%u/%u/%u/%u mV  Temp %.1f/%.1f/%.1f/%.1f C  %s\n",
+       p.idx, p.cell[0],p.cell[1],p.cell[2],p.cell[3],p.cell[4],
+       p.temp[0]/10.0, p.temp[1]/10.0, p.temp[2]/10.0, p.temp[3]/10.0,
+       p.sn.c_str());
+}
+
 // Dekodiert die param_info-Nutzlast und fuellt gData.
 // Rahmen und Feldkodierung siehe Kopfkommentar.
 static bool parseParamInfo(const String& b64){
@@ -1354,6 +1460,34 @@ static bool parseParamInfo(const String& b64){
   size_t got=0;
   mbedtls_base64_decode(b,need,&got,(const uint8_t*)b64.c_str(),b64.length());
   if(got<16||b[0]!=0xff||b[1]!=0x09){ free(b); return false; }
+
+  // Nachrichtentyp steht in Byte 7/8. Die Feldnummern bedeuten je Typ etwas
+  // anderes, deshalb muss hier getrennt werden: 0405 traegt die Leistungen,
+  // 0500 die Daten der einzelnen Akkupacks.
+  if(b[7]==0x05 && b[8]==0x00){
+    // Aufbau der Nachricht mitschreiben. Nur so laesst sich unterscheiden, ob
+    // weitere Packbloecke gar nicht ankommen oder ob der Filter sie uebergeht.
+    String map = "len=" + String((unsigned)got) + "  ";
+    size_t i=9;
+    bool desync=false;
+    while(i+1<got){
+      uint8_t tag=b[i], ln=b[i+1];
+      if(i+2+(size_t)ln>got){ desync=true; break; }
+      uint8_t ty = ln ? b[i+2] : 0;
+      char t[24]; snprintf(t,sizeof(t),"%02x:%u/t%02x ",tag,ln,ty);
+      map += t;
+      // a4 aufwaerts sind die Packbloecke, erkennbar am Typ 04 und der Laenge
+      if(tag>=0xa4 && ln>32 && ty==0x04)
+        parsePackBlock(b+i+3, ln-1);
+      i+=2+ln;
+    }
+    if(desync) map += "<< ABBRUCH: Laenge passt nicht";
+    else if(i<got) map += "<< Rest " + String((unsigned)(got-i)) + " B";
+    gLastStateInfo = map;
+    LOGF("[0500] %s\n", map.c_str());
+    free(b);
+    return false;   // keine Leistungswerte in dieser Nachricht
+  }
 
   bool  haveSolar=false;
   float solar=0, battW=0, outW=0, str[4]={0,0,0,0};
@@ -1380,7 +1514,10 @@ static bool parseParamInfo(const String& b64){
     if(ln==2 && d[0]==0x01 && d[1]<=100){
       char t[16]; snprintf(t,sizeof(t),"%02x=%u ",tag,d[1]);
       ints+=t;
-      if(tag==0xa3) soc=d[1];       // bester Kandidat, noch unbestaetigt
+      // 0xa3 ist der Ladestand. Bestaetigt durch Abgleich mit der App und
+      // dadurch, dass der Wert beim Entladen mitlaeuft, waehrend 0xa6 - der
+      // andere Kandidat mit demselben Anfangswert - stehenblieb.
+      if(tag==0xa3) soc=d[1];
     }
     i+=2+ln;
   }
@@ -1398,7 +1535,7 @@ static bool parseParamInfo(const String& b64){
   gOutW            = outW;          // Netzteil rechnet den Hausverbrauch daraus
   if(soc>=0){
     gData.battery_pct= soc;
-    gData.battery_wh = soc/100.0f*BATT_CAP_WH;
+    gData.battery_wh = soc/100.0f*cfg.battWh;
   }
   gData.valid=true;
   for(int k=0;k<4;k++) gPvStr[k]=str[k];
@@ -1645,7 +1782,7 @@ bool fetchData(){
   if(batt_in<0){batt_out=-batt_in;batt_in=0;}
   float home=jF(sb["to_home_load"]);
   float grid=jF(gi["grid_to_home_power"])-jF(gi["photovoltaic_to_grid_power"]);
-  gData={pv,(batt_pct/100.f)*BATT_CAP_WH,batt_pct,home,
+  gData={pv,(batt_pct/100.f)*cfg.battWh,batt_pct,home,
          fabsf(grid)<0.5f?0.f:grid,
          batt_in <0.5f?0.f:batt_in,
          batt_out<0.5f?0.f:batt_out,true};
