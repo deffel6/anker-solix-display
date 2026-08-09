@@ -206,7 +206,10 @@ Siehe [CHANGELOG.md](CHANGELOG.md).
 
 ## Lizenz
 
-MIT, siehe [LICENSE](LICENSE).
+Nutzung für **private, nicht-kommerzielle Zwecke** gestattet. Veränderte
+Fassungen weiterzugeben, die Software zu verkaufen oder sie in ein
+kommerzielles Produkt einzubauen, bedarf der schriftlichen Zustimmung.
+Wortlaut in [LICENSE](LICENSE), deutsch und englisch.
 
 Kein offizielles Anker-Projekt. „Anker" und „SOLIX" sind Marken ihrer jeweiligen
 Inhaber. Die verwendeten Schnittstellen sind nicht dokumentiert und können sich
