@@ -1,32 +1,3 @@
-Copyright (c) 2026 Detlev Euskirchen
-
-Lizenziert unter der PolyForm Noncommercial License 1.0.0.
-Der englische Wortlaut weiter unten ist massgeblich.
-
-
-ZUSAMMENFASSUNG AUF DEUTSCH (unverbindlich, nur zur Orientierung)
-
-  Erlaubt ist die Nutzung fuer nicht-kommerzielle Zwecke: privat, in der
-  Forschung und Lehre, durch gemeinnuetzige Organisationen und Behoerden.
-  Ebenso erlaubt sind Aenderungen und deren Weitergabe, solange auch das
-  nicht-kommerziellen Zwecken dient und dieser Hinweis beiliegt.
-
-  Nicht erlaubt ist die kommerzielle Nutzung, also insbesondere der Verkauf
-  der Software, ihr Einbau in ein kommerzielles Produkt oder ihr Einsatz im
-  Rahmen einer geschaeftlichen Taetigkeit.
-
-  Eine Ausnahme regelt der Abschnitt "Personal Uses": Die private Nutzung
-  bleibt auch dann erlaubt, wenn sie nebenbei einen geschaeftlichen Nutzen
-  hat.
-
-  Die Software wird ohne jede Gewaehrleistung bereitgestellt.
-
-Wer sie kommerziell einsetzen moechte, schreibe an esp32.display@gmail.com.
-
-
---------------------------------------------------------------------------
-
-
 # PolyForm Noncommercial License 1.0.0
 
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
@@ -158,3 +129,5 @@ software under these terms.
 
 **Use** means anything you do with the software requiring one
 of your licenses.
+
+Required Notice: Copyright (c) 2026 Detlev Euskirchen
