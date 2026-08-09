@@ -215,8 +215,13 @@ Verwertung: die Software zu verkaufen, in ein kommerzielles Produkt einzubauen
 oder im Rahmen eines Geschäftsbetriebs einzusetzen.
 
 Wer sie kommerziell nutzen möchte, schreibt an esp32.display@gmail.com.
-In [LICENSE](LICENSE) steht der vollständige Wortlaut, davor eine
-Zusammenfassung auf Deutsch.
+Der vollständige Wortlaut steht in [LICENSE](LICENSE), eine Zusammenfassung auf
+Deutsch in [LIZENZ-KURZ.md](LIZENZ-KURZ.md).
+
+SPDX-Kennung: `PolyForm-Noncommercial-1.0.0`. GitHub zeigt oben trotzdem
+„Other" an — die dortige Erkennung umfasst nur Lizenzen von
+choosealicense.com, und da PolyForm die kommerzielle Nutzung ausschließt, ist
+sie definitionsgemäß keine Open-Source-Lizenz und dort nicht gelistet.
 
 Kein offizielles Anker-Projekt. „Anker" und „SOLIX" sind Marken ihrer jeweiligen
 Inhaber. Die verwendeten Schnittstellen sind nicht dokumentiert und können sich
