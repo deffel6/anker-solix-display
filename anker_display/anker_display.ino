@@ -35,6 +35,9 @@
 ║                                                             ║
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
+
+  SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+  Copyright (c) 2026 Detlev Euskirchen
 */
 #define FW_VERSION "1.10.0"
 
