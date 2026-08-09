@@ -1,21 +1,57 @@
-MIT License
+Custom Non-Commercial License
 
 Copyright (c) 2026 Detlev Euskirchen
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is hereby granted to use this software and its associated
+documentation files (the "Software") for private, non-commercial purposes
+only.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+The following is expressly NOT permitted without prior written consent from
+the copyright holder:
+- Modifying the Software and distributing or selling the modified version
+- Selling, sublicensing, or otherwise commercially exploiting the Software
+  or any part of it
+- Distributing the Software as part of a commercial product or service
+
+The above copyright notice and this permission notice shall be included in
+all copies of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+---
+
+
+Eigene Lizenz - Nur private Nutzung
+
+Copyright (c) 2026 Detlev Euskirchen
+
+Hiermit wird die Nutzung dieser Software und der zugehörigen
+Dokumentationsdateien (die "Software") ausschließlich für private,
+nicht-kommerzielle Zwecke gestattet.
+
+Ausdrücklich NICHT gestattet ist, ohne vorherige schriftliche Zustimmung des
+Urheberrechtsinhabers:
+- die Software zu verändern und die veränderte Version zu verbreiten oder
+  zu verkaufen
+- die Software oder Teile davon zu verkaufen, unterzulizenzieren oder
+  anderweitig kommerziell zu verwerten
+- die Software als Teil eines kommerziellen Produkts oder einer
+  Dienstleistung zu verbreiten
+
+Der obige Copyright-Hinweis und dieser Erlaubnishinweis sind in allen Kopien
+der Software beizufügen.
+
+DIE SOFTWARE WIRD "WIE BESEHEN" ZUR VERFÜGUNG GESTELLT, OHNE JEGLICHE
+AUSDRÜCKLICHE ODER STILLSCHWEIGENDE GEWÄHRLEISTUNG, EINSCHLIESSLICH, ABER
+NICHT BESCHRÄNKT AUF DIE GEWÄHRLEISTUNG DER MARKTGÄNGIGKEIT, DER EIGNUNG FÜR
+EINEN BESTIMMTEN ZWECK UND DER NICHTVERLETZUNG VON RECHTEN DRITTER. IN
+KEINEM FALL HAFTET DER AUTOR FÜR ANSPRÜCHE, SCHÄDEN ODER SONSTIGE HAFTUNG,
+OB AUS VERTRAG, UNERLAUBTER HANDLUNG ODER ANDERWEITIG, DIE SICH AUS ODER IM
+ZUSAMMENHANG MIT DER SOFTWARE ODER DER NUTZUNG ODER SONSTIGEN VERWENDUNG DER
+SOFTWARE ERGEBEN.
