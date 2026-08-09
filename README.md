@@ -206,10 +206,17 @@ Siehe [CHANGELOG.md](CHANGELOG.md).
 
 ## Lizenz
 
-Nutzung für **private, nicht-kommerzielle Zwecke** gestattet. Veränderte
-Fassungen weiterzugeben, die Software zu verkaufen oder sie in ein
-kommerzielles Produkt einzubauen, bedarf der schriftlichen Zustimmung.
-Wortlaut in [LICENSE](LICENSE), deutsch und englisch.
+[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)
+
+Nutzung, Änderung und Weitergabe sind für **nicht-kommerzielle Zwecke** frei —
+privat, in Forschung und Lehre, durch gemeinnützige Einrichtungen. Pull Requests
+sind also ausdrücklich willkommen. Nicht erlaubt ist die kommerzielle
+Verwertung: die Software zu verkaufen, in ein kommerzielles Produkt einzubauen
+oder im Rahmen eines Geschäftsbetriebs einzusetzen.
+
+Wer sie kommerziell nutzen möchte, schreibt an esp32.display@gmail.com.
+In [LICENSE](LICENSE) steht der vollständige Wortlaut, davor eine
+Zusammenfassung auf Deutsch.
 
 Kein offizielles Anker-Projekt. „Anker" und „SOLIX" sind Marken ihrer jeweiligen
 Inhaber. Die verwendeten Schnittstellen sind nicht dokumentiert und können sich

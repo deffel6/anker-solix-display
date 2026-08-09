@@ -1,57 +1,160 @@
-Custom Non-Commercial License
-
 Copyright (c) 2026 Detlev Euskirchen
 
-Permission is hereby granted to use this software and its associated
-documentation files (the "Software") for private, non-commercial purposes
-only.
-
-The following is expressly NOT permitted without prior written consent from
-the copyright holder:
-- Modifying the Software and distributing or selling the modified version
-- Selling, sublicensing, or otherwise commercially exploiting the Software
-  or any part of it
-- Distributing the Software as part of a commercial product or service
-
-The above copyright notice and this permission notice shall be included in
-all copies of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
-ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Lizenziert unter der PolyForm Noncommercial License 1.0.0.
+Der englische Wortlaut weiter unten ist massgeblich.
 
 
----
+ZUSAMMENFASSUNG AUF DEUTSCH (unverbindlich, nur zur Orientierung)
+
+  Erlaubt ist die Nutzung fuer nicht-kommerzielle Zwecke: privat, in der
+  Forschung und Lehre, durch gemeinnuetzige Organisationen und Behoerden.
+  Ebenso erlaubt sind Aenderungen und deren Weitergabe, solange auch das
+  nicht-kommerziellen Zwecken dient und dieser Hinweis beiliegt.
+
+  Nicht erlaubt ist die kommerzielle Nutzung, also insbesondere der Verkauf
+  der Software, ihr Einbau in ein kommerzielles Produkt oder ihr Einsatz im
+  Rahmen einer geschaeftlichen Taetigkeit.
+
+  Eine Ausnahme regelt der Abschnitt "Personal Uses": Die private Nutzung
+  bleibt auch dann erlaubt, wenn sie nebenbei einen geschaeftlichen Nutzen
+  hat.
+
+  Die Software wird ohne jede Gewaehrleistung bereitgestellt.
+
+Wer sie kommerziell einsetzen moechte, schreibe an esp32.display@gmail.com.
 
 
-Eigene Lizenz - Nur private Nutzung
+--------------------------------------------------------------------------
 
-Copyright (c) 2026 Detlev Euskirchen
 
-Hiermit wird die Nutzung dieser Software und der zugehörigen
-Dokumentationsdateien (die "Software") ausschließlich für private,
-nicht-kommerzielle Zwecke gestattet.
+# PolyForm Noncommercial License 1.0.0
 
-Ausdrücklich NICHT gestattet ist, ohne vorherige schriftliche Zustimmung des
-Urheberrechtsinhabers:
-- die Software zu verändern und die veränderte Version zu verbreiten oder
-  zu verkaufen
-- die Software oder Teile davon zu verkaufen, unterzulizenzieren oder
-  anderweitig kommerziell zu verwerten
-- die Software als Teil eines kommerziellen Produkts oder einer
-  Dienstleistung zu verbreiten
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-Der obige Copyright-Hinweis und dieser Erlaubnishinweis sind in allen Kopien
-der Software beizufügen.
+## Acceptance
 
-DIE SOFTWARE WIRD "WIE BESEHEN" ZUR VERFÜGUNG GESTELLT, OHNE JEGLICHE
-AUSDRÜCKLICHE ODER STILLSCHWEIGENDE GEWÄHRLEISTUNG, EINSCHLIESSLICH, ABER
-NICHT BESCHRÄNKT AUF DIE GEWÄHRLEISTUNG DER MARKTGÄNGIGKEIT, DER EIGNUNG FÜR
-EINEN BESTIMMTEN ZWECK UND DER NICHTVERLETZUNG VON RECHTEN DRITTER. IN
-KEINEM FALL HAFTET DER AUTOR FÜR ANSPRÜCHE, SCHÄDEN ODER SONSTIGE HAFTUNG,
-OB AUS VERTRAG, UNERLAUBTER HANDLUNG ODER ANDERWEITIG, DIE SICH AUS ODER IM
-ZUSAMMENHANG MIT DER SOFTWARE ODER DER NUTZUNG ODER SONSTIGEN VERWENDUNG DER
-SOFTWARE ERGEBEN.
+In order to get any license under these terms, you must agree
+to them as both strict obligations and conditions to all
+your licenses.
+
+## Copyright License
+
+The licensor grants you a copyright license for the
+software to do everything you might do with the software
+that would otherwise infringe the licensor's copyright
+in it for any permitted purpose.  However, you may
+only distribute the software according to [Distribution
+License](#distribution-license) and make changes or new works
+based on the software according to [Changes and New Works
+License](#changes-and-new-works-license).
+
+## Distribution License
+
+The licensor grants you an additional copyright license
+to distribute copies of the software.  Your license
+to distribute covers distributing the software with
+changes and new works permitted by [Changes and New Works
+License](#changes-and-new-works-license).
+
+## Notices
+
+You must ensure that anyone who gets a copy of any part of
+the software from you also gets a copy of these terms or the
+URL for them above, as well as copies of any plain-text lines
+beginning with `Required Notice:` that the licensor provided
+with the software.  For example:
+
+> Required Notice: Copyright Yoyodyne, Inc. (http://example.com)
+
+## Changes and New Works License
+
+The licensor grants you an additional copyright license to
+make changes and new works based on the software for any
+permitted purpose.
+
+## Patent License
+
+The licensor grants you a patent license for the software that
+covers patent claims the licensor can license, or becomes able
+to license, that you would infringe by using the software.
+
+## Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+## Personal Uses
+
+Personal use for research, experiment, and testing for
+the benefit of public knowledge, personal study, private
+entertainment, hobby projects, amateur pursuits, or religious
+observance, without any anticipated commercial application,
+is use for a permitted purpose.
+
+## Noncommercial Organizations
+
+Use by any charitable organization, educational institution,
+public research organization, public safety or health
+organization, environmental protection organization,
+or government institution is use for a permitted purpose
+regardless of the source of funding or obligations resulting
+from the funding.
+
+## Fair Use
+
+You may have "fair use" rights for the software under the
+law. These terms do not limit them.
+
+## No Other Rights
+
+These terms do not allow you to sublicense or transfer any of
+your licenses to anyone else, or prevent the licensor from
+granting licenses to anyone else.  These terms do not imply
+any other licenses.
+
+## Patent Defense
+
+If you make any written claim that the software infringes or
+contributes to infringement of any patent, your patent license
+for the software granted under these terms ends immediately. If
+your company makes such a claim, your patent license ends
+immediately for work on behalf of your company.
+
+## Violations
+
+The first time you are notified in writing that you have
+violated any of these terms, or done anything with the software
+not covered by your licenses, your licenses can nonetheless
+continue if you come into full compliance with these terms,
+and take practical steps to correct past violations, within
+32 days of receiving notice.  Otherwise, all your licenses
+end immediately.
+
+## No Liability
+
+***As far as the law allows, the software comes as is, without
+any warranty or condition, and the licensor will not be liable
+to you for any damages arising out of these terms or the use
+or nature of the software, under any kind of legal claim.***
+
+## Definitions
+
+The **licensor** is the individual or entity offering these
+terms, and the **software** is the software the licensor makes
+available under these terms.
+
+**You** refers to the individual or entity agreeing to these
+terms.
+
+**Your company** is any legal entity, sole proprietorship,
+or other kind of organization that you work for, plus all
+organizations that have control over, are under the control of,
+or are under common control with that organization.  **Control**
+means ownership of substantially all the assets of an entity,
+or the power to direct its management and policies by vote,
+contract, or otherwise.  Control can be direct or indirect.
+
+**Your licenses** are all the licenses granted to you for the
+software under these terms.
+
+**Use** means anything you do with the software requiring one
+of your licenses.
