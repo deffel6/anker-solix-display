@@ -36,7 +36,7 @@
 ║  Ausfuehrlich: docs/mqtt-protokoll.md                       ║
 ╚═════════════════════════════════════════════════════════════╝
 */
-#define FW_VERSION "1.9.0"
+#define FW_VERSION "1.10.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -131,6 +131,8 @@ struct Config {
   // Nutzbare Gesamtkapazitaet aller Akkus in Wh. Nur fuer die Umrechnung
   // Prozent -> Wattstunden; laesst sich in der Weboberflaeche setzen.
   int    battWh = BATT_CAP_WH;
+  // Ausrichtung der Anzeige: 0/1/2/3 entspricht 0/90/180/270 Grad.
+  int    rotation = 0;
 };
 static Config cfg;
 
@@ -453,6 +455,7 @@ void loadConfig() {
   cfg.siteName  =prefs.getString("sitename","");
   cfg.gridScale =prefs.getFloat("gridscale",0);
   cfg.battWh    =prefs.getInt("battwh",BATT_CAP_WH);
+  cfg.rotation  =prefs.getInt("rot",0);
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
@@ -464,6 +467,7 @@ void saveConfig() {
   prefs.putString("siteid",cfg.siteId); prefs.putString("sitename",cfg.siteName);
   prefs.putFloat("gridscale",cfg.gridScale);
   prefs.putInt("battwh",cfg.battWh);
+  prefs.putInt("rot",cfg.rotation);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -630,6 +634,7 @@ String httpsPost(const String& path, const String& body,
                  const String& token="", const String& gtoken="",
                  bool encrypt=false);
 static int rawPost(const String& path, const String& body, String& outResp);
+void drawDisplay();
 static void applyGridScale();
 void handleSave();
 
@@ -672,7 +677,7 @@ void handleStatus(){
   // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
   // static, nicht auf dem Stack: der Task-Stack ist knapp bemessen, und der
   // Webserver ruft die Funktion ohnehin nie verschachtelt auf.
-  static char b[4096];
+  static char b[5120];
   const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
@@ -728,6 +733,13 @@ void handleStatus(){
     "border-radius:6px;color:#eee'> Wh "
     "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
     "color:#f0a500;cursor:pointer'>setzen</button></form></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Anzeige drehen: "
+    "<a style='color:#f0a500' href='/rotate?v=0'>0&deg;</a> &middot; "
+    "<a style='color:#f0a500' href='/rotate?v=1'>90&deg;</a> &middot; "
+    "<a style='color:#f0a500' href='/rotate?v=2'>180&deg;</a> &middot; "
+    "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
+    "(aktuell %d&deg;)</p>"
     "<a class='btn' href='/akkus'>Akkupacks im Detail</a>"
     "<a class='sec' href='/sites'>Anlage wechseln</a>"
     "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
@@ -743,7 +755,7 @@ void handleStatus(){
     gPvStr[0]+gPvStr[1]+gPvStr[2]+gPvStr[3],
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
-    cfg.battWh);
+    cfg.battWh, cfg.rotation*90);
   server.send(200,"text/html; charset=utf-8",b);
 }
 
@@ -819,6 +831,21 @@ void handlePacks(){
 
 // Teiler des Netzzaehlers von Hand setzen. Noetig, weil die Einheit je
 // Geraet verschieden ist und wir nicht jeden Zaehler kennen koennen.
+// Ausrichtung der Anzeige drehen. Wirkt sofort - das Sprite ist quadratisch,
+// die Abmessungen aendern sich also nicht und es muss nichts neu angelegt
+// werden. Ein Neustart waere nur laestig.
+void handleRotate(){
+  int v=server.arg("v").toInt();
+  if(v>=0 && v<=3){
+    cfg.rotation=v; saveConfig();
+    lcd.setRotation(v);
+    lcd.fillScreen(C_BLACK);
+    drawDisplay();
+    Serial.printf("[LCD] Ausrichtung %d Grad\n", v*90);
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 void handleBattWh(){
   int v=server.arg("v").toInt();
   if(v>=100 && v<=60000){
@@ -848,6 +875,7 @@ void startWebUi(){
   server.on("/gridscale",  HTTP_GET,  handleGridScale);
   server.on("/akkus",      HTTP_GET,  handlePacks);
   server.on("/battwh",     HTTP_GET,  handleBattWh);
+  server.on("/rotate",     HTTP_GET,  handleRotate);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -1914,7 +1942,14 @@ void drawDisplay(){
 void setup(){
   Serial.begin(115200); delay(300);
   Serial.println("\n[BOOT] Anker Display " FW_VERSION);
-  lcd.init(); lcd.setRotation(0); lcd.setBrightness(200); lcd.fillScreen(C_BLACK);
+  lcd.init();
+  { // Ausrichtung vor dem ersten Zeichnen setzen. loadConfig() kommt erst
+    // spaeter, deshalb hier direkt aus dem NVS lesen.
+    prefs.begin("anker",true);
+    lcd.setRotation(prefs.getInt("rot",0)&3);
+    prefs.end();
+  }
+  lcd.setBrightness(200); lcd.fillScreen(C_BLACK);
   spr.setColorDepth(8);
   if(!spr.createSprite(240,240)) Serial.println("[SPR] RAM zu wenig");
   else                           Serial.println("[SPR] OK");

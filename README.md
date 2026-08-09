@@ -95,9 +95,11 @@ Darüber lässt sich außerdem
 - die **Anlage wechseln**, falls die automatische Wahl nicht die gewünschte
   getroffen hat,
 - die **Zugangsdaten ändern**, etwa nach einem WLAN-Wechsel,
-- und die **Akkukapazität** setzen, falls Erweiterungsbatterien verbaut sind.
+- die **Akkukapazität** setzen, falls Erweiterungsbatterien verbaut sind,
+- und die **Anzeige drehen** (0/90/180/270 Grad), falls das Gehäuse anders
+  steht als gedacht.
 
-Beides ohne Reset und ohne neu zu flashen.
+Alles davon ohne Reset und ohne neu zu flashen.
 
 Das Anker-Passwort wird verschlüsselt an Anker übertragen (ECDH plus AES, so wie
 die App es macht) und liegt lokal im NVS-Flash des ESP32. Es verlässt das Gerät

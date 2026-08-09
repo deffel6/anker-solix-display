@@ -1,5 +1,16 @@
 # Änderungen
 
+## 1.10.0 — 9. August 2026
+
+**Anzeige drehbar.** Die Ausrichtung lässt sich auf der Statusseite auf 0, 90,
+180 oder 270 Grad stellen — nützlich, wenn das Gehäuse anders steht als beim
+Bau gedacht oder das Kabel auf der falschen Seite herauskommt.
+
+Ein Klick genügt, ein Neustart ist nicht nötig: Das Sprite ist mit 240×240
+quadratisch, die Abmessungen ändern sich beim Drehen also nicht. Beim Booten
+wird die Ausrichtung aus dem Flash gelesen, und zwar bevor zum ersten Mal
+gezeichnet wird — sonst blitzte das Bild kurz in der alten Lage auf.
+
 ## 1.9.0 — 6. August 2026
 
 **Akkupacks im Detail.** Neue Seite `/akkus` mit Ladestand, den fünf
