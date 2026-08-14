@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.10.0"
+#define FW_VERSION "1.12.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -86,10 +86,22 @@ static const char* SERVER_PUBKEY_HEX =
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPLAY
 // ─────────────────────────────────────────────────────────────────────────────
+// ── Touch ───────────────────────────────────────────────────────────────────
+// Runde GC9A01-Module mit Touch verwenden praktisch immer einen CST816S ueber
+// I2C. Die Anschluesse unten gelten fuer das verbreitete Waveshare-Modul
+// ESP32-C3-LCD-1.28; weicht dein Board ab, sind es genau diese vier Zeilen.
+// Ohne Touch-Hardware schadet das nichts: getTouch() liefert dann einfach nie
+// eine Beruehrung, und die zweite Seite bleibt unerreichbar.
+#define TOUCH_SDA   4
+#define TOUCH_SCL   5
+#define TOUCH_INT   0
+#define TOUCH_RST  -1   // teilt sich beim C3-Modul den Reset mit dem Display
+
 class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_GC9A01 _panel;
-  lgfx::Bus_SPI      _bus;
-  lgfx::Light_PWM    _light;
+  lgfx::Panel_GC9A01   _panel;
+  lgfx::Bus_SPI        _bus;
+  lgfx::Light_PWM      _light;
+  lgfx::Touch_CST816S  _touch;
 public:
   LGFX() {
     { auto c=_bus.config(); c.spi_host=SPI2_HOST; c.spi_mode=0;
@@ -103,6 +115,13 @@ public:
     { auto c=_light.config(); c.pin_bl=3; c.invert=false;
       c.freq=44100; c.pwm_channel=7;
       _light.config(c); _panel.setLight(&_light); }
+    { auto c=_touch.config();
+      c.x_min=0; c.x_max=239; c.y_min=0; c.y_max=239;
+      c.pin_int=TOUCH_INT; c.pin_rst=TOUCH_RST;
+      c.bus_shared=false; c.offset_rotation=0;
+      c.i2c_port=0; c.pin_sda=TOUCH_SDA; c.pin_scl=TOUCH_SCL;
+      c.freq=400000; c.i2c_addr=0x15;
+      _touch.config(c); _panel.setTouch(&_touch); }
     setPanel(&_panel);
   }
 };
@@ -136,6 +155,9 @@ struct Config {
   int    battWh = BATT_CAP_WH;
   // Ausrichtung der Anzeige: 0/1/2/3 entspricht 0/90/180/270 Grad.
   int    rotation = 0;
+  // Standort fuer die Wettervorhersage. 0/0 = noch nicht gesetzt, dann
+  // bleibt die dritte Seite leer.
+  float  lat = 0, lon = 0;
 };
 static Config cfg;
 
@@ -211,6 +233,17 @@ static SiteEntry gSiteList[10];
 static int       gSiteCount = 0;
 
 static bool gFixMode = false;
+static int      gPage        = 0;   // 0 = Messwerte, 1 = Netz/PV, 2 = Wetter
+#define PAGES 3
+
+// ── Wettervorhersage ────────────────────────────────────────────────────────
+// Quelle: open-meteo.com - kostenlos, ohne Anmeldung und ohne Schluessel.
+// Das ist der Grund fuer die Wahl: wer das Projekt nachbaut, muss sich
+// nirgends registrieren.
+struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
+static WxDay         gWx[2];
+static bool          gWxValid = false;
+static unsigned long gWxLast  = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HILFSFUNKTIONEN
@@ -459,6 +492,8 @@ void loadConfig() {
   cfg.gridScale =prefs.getFloat("gridscale",0);
   cfg.battWh    =prefs.getInt("battwh",BATT_CAP_WH);
   cfg.rotation  =prefs.getInt("rot",0);
+  cfg.lat       =prefs.getFloat("lat",0);
+  cfg.lon       =prefs.getFloat("lon",0);
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
@@ -471,6 +506,8 @@ void saveConfig() {
   prefs.putFloat("gridscale",cfg.gridScale);
   prefs.putInt("battwh",cfg.battWh);
   prefs.putInt("rot",cfg.rotation);
+  prefs.putFloat("lat",cfg.lat);
+  prefs.putFloat("lon",cfg.lon);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -638,6 +675,7 @@ String httpsPost(const String& path, const String& body,
                  bool encrypt=false);
 static int rawPost(const String& path, const String& body, String& outResp);
 void drawDisplay();
+bool fetchWeather();
 static void applyGridScale();
 void handleSave();
 
@@ -743,6 +781,17 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/rotate?v=2'>180&deg;</a> &middot; "
     "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
     "(aktuell %d&deg;)</p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Standort f&uuml;r die Wettervorhersage: "
+    "<form style='display:inline' action='/geo'>"
+    "<input name='lat' type='number' step='0.0001' value='%.4f' placeholder='Breite' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<input name='lon' type='number' step='0.0001' value='%.4f' placeholder='Laenge' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
+    "color:#f0a500;cursor:pointer'>setzen</button></form></p>"
     "<a class='btn' href='/akkus'>Akkupacks im Detail</a>"
     "<a class='sec' href='/sites'>Anlage wechseln</a>"
     "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
@@ -758,7 +807,7 @@ void handleStatus(){
     gPvStr[0]+gPvStr[1]+gPvStr[2]+gPvStr[3],
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
-    cfg.battWh, cfg.rotation*90);
+    cfg.battWh, cfg.rotation*90, cfg.lat, cfg.lon);
   server.send(200,"text/html; charset=utf-8",b);
 }
 
@@ -849,6 +898,18 @@ void handleRotate(){
   server.sendHeader("Location","/"); server.send(302);
 }
 
+// Standort fuer die Wettervorhersage setzen und sofort abrufen.
+void handleGeo(){
+  float la=server.arg("lat").toFloat(), lo=server.arg("lon").toFloat();
+  if(la>=-90 && la<=90 && lo>=-180 && lo<=180 && (la!=0 || lo!=0)){
+    cfg.lat=la; cfg.lon=lo; saveConfig();
+    Serial.printf("[WX] Standort %.4f / %.4f\n",la,lo);
+    fetchWeather();
+    gWxLast=millis();
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 void handleBattWh(){
   int v=server.arg("v").toInt();
   if(v>=100 && v<=60000){
@@ -878,6 +939,7 @@ void startWebUi(){
   server.on("/gridscale",  HTTP_GET,  handleGridScale);
   server.on("/akkus",      HTTP_GET,  handlePacks);
   server.on("/battwh",     HTTP_GET,  handleBattWh);
+  server.on("/geo",        HTTP_GET,  handleGeo);
   server.on("/rotate",     HTTP_GET,  handleRotate);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
@@ -1851,7 +1913,7 @@ bool fetchData(){
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPLAY ZEICHNEN
 // ─────────────────────────────────────────────────────────────────────────────
-void drawDisplay(){
+static void drawMain(){
   bool useSprite=spr.getBuffer()!=nullptr;
   lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
   g->fillScreen(C_BLACK);
@@ -1931,6 +1993,8 @@ void drawDisplay(){
 
   g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(flowCol,C_BLACK);
   g->drawString(flowLabel,120,174);
+  g->setTextColor(C_GRAY,C_BLACK);
+  g->drawString("wischen >",120,212);
   g->setFont(&fonts::FreeSansBold12pt7b);
   g->setTextColor(hasFlow?C_WHITE:C_GRAY,C_BLACK);
   snprintf(buf,sizeof(buf),"%.0fW",flowVal);
@@ -1998,12 +2062,198 @@ void setup(){
   drawDisplay();
 }
 
+// Zweite Seite: Netzwerk und Zustand. Ueber die IP laeuft die Weboberflaeche,
+// und genau die sucht man erfahrungsgemaess dann, wenn das Geraet schon
+// irgendwo haengt und man nicht mehr an den seriellen Anschluss kommt.
+static void drawInfo(){
+  bool useSprite=spr.getBuffer()!=nullptr;
+  lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
+  g->fillScreen(C_BLACK);
+  g->setTextDatum(lgfx::TC_DATUM);
+  char b[16];
+
+  bool wifi = WiFi.status()==WL_CONNECTED;
+  g->setFont(&fonts::FreeSansBold12pt7b);
+  g->setTextColor(wifi?C_GREEN:C_RED,C_BLACK);
+  g->drawString(wifi?WiFi.localIP().toString().c_str():"kein WLAN",120,42);
+
+  // Beschriftung klein ueber dem Wert. Nebeneinander wuerden Label und Wert
+  // in der grossen Schrift zusammenstossen - zwei Spalten lassen dafuer
+  // nicht genug Breite. Die Ueberschrift "PANELS" entfaellt dadurch.
+  for(int i=0;i<4;i++){
+    int col=(i&1)?168:72, row=(i<2)?72:116;
+    snprintf(b,sizeof(b),"PV%d",i+1);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString(b,col,row);
+    snprintf(b,sizeof(b),"%.0f W",gPvStr[i]);
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_YELLOW,C_BLACK);
+    g->drawString(b,col,row+14);
+  }
+
+  g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+  g->drawString("AKKU",120,162);
+
+  // Je Pack ein Wert, wie in der App. Gemittelt ueber die vier Fuehler des
+  // Packs - einzeln weichen sie um bis zu ein Grad voneinander ab.
+  int n=0; String line;
+  for(int k=0;k<MAX_PACKS && n<3;k++){
+    if(!gPacks[k].valid) continue;
+    int sum=0;
+    for(int t=0;t<4;t++) sum+=gPacks[k].temp[t];
+    // Kein Gradzeichen: die GFX-Schriften decken nur 0x20..0x7E ab,
+    // 0xB0 kaeme als Luecke heraus.
+    snprintf(b,sizeof(b),"%dC", (int)(sum/40.0f+0.5f));
+    if(n) line+="  ";
+    line+=b; n++;
+  }
+  g->setFont(&fonts::FreeSansBold12pt7b);
+  g->setTextColor(n?C_WHITE:C_GRAY,C_BLACK);
+  g->drawString(n?line.c_str():"--",120,178);
+
+  if(useSprite) spr.pushSprite(0,0);
+}
+
+// Dritte Seite: Vorhersage fuer heute und morgen. Zeilenweise beschriftet,
+// zwei Spalten - so bleibt jede Zeile schmal genug fuer den Kreis.
+static void drawWeather(){
+  bool useSprite=spr.getBuffer()!=nullptr;
+  lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
+  g->fillScreen(C_BLACK);
+  g->setTextDatum(lgfx::TC_DATUM);
+  char b[20];
+
+  if(cfg.lat==0 && cfg.lon==0){
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+    g->drawString("WETTER",120,86);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString("Standort fehlt",120,116);
+    g->drawString("im Browser eintragen",120,138);
+    if(useSprite) spr.pushSprite(0,0);
+    return;
+  }
+  if(!gWxValid){
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+    g->drawString("WETTER",120,96);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString("keine Daten",120,126);
+    if(useSprite) spr.pushSprite(0,0);
+    return;
+  }
+
+  g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+  g->drawString("HEUTE",104,46);
+  g->drawString("MORGEN",180,46);
+
+  const char* lbl[4]={"GRAD","SONNE","WOLKE","REGEN"};
+  for(int r=0;r<4;r++){
+    int y=74+r*29;
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->setTextDatum(lgfx::TL_DATUM);
+    g->drawString(lbl[r],24,y+3);
+    g->setTextDatum(lgfx::TC_DATUM);
+    g->setFont(&fonts::FreeSansBold12pt7b);
+    for(int d=0;d<2;d++){
+      WxDay& w=gWx[d];
+      uint32_t col=C_WHITE;
+      switch(r){
+        case 0: snprintf(b,sizeof(b),"%.0f/%.0f",w.tmax,w.tmin); break;
+        case 1: snprintf(b,sizeof(b),"%.1fh",w.sunH);  col=C_YELLOW; break;
+        case 2: snprintf(b,sizeof(b),"%.0f%%",w.cloud); col=w.cloud>60?C_GRAY:C_WHITE; break;
+        default:snprintf(b,sizeof(b),"%.1fmm",w.rain);  col=w.rain>0.5f?C_BLUE:C_GRAY; break;
+      }
+      g->setTextColor(col,C_BLACK);
+      g->drawString(b, d?180:104, y);
+    }
+  }
+  if(useSprite) spr.pushSprite(0,0);
+}
+
+void drawDisplay(){
+  if(gPage==2)      drawWeather();
+  else if(gPage==1) drawInfo();
+  else              drawMain();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOUCH
+// Nur die waagerechte Wischgeste wird ausgewertet. Ein Antippen soll nichts
+// ausloesen - das Geraet haengt an der Wand und wird beim Abstauben beruehrt.
+// ─────────────────────────────────────────────────────────────────────────────
+// Holt die Vorhersage fuer heute und morgen. Wird alle 30 Minuten
+// aufgefrischt - haeufiger waere sinnlos, das Modell rechnet stuendlich.
+bool fetchWeather(){
+  if(cfg.lat==0 && cfg.lon==0) return false;
+  WiFiClientSecure c; c.setInsecure();
+  HTTPClient h;
+  String url = "https://api.open-meteo.com/v1/forecast?latitude="+String(cfg.lat,4)
+             + "&longitude="+String(cfg.lon,4)
+             + "&daily=temperature_2m_max,temperature_2m_min,sunshine_duration,"
+               "cloud_cover_mean,precipitation_sum&forecast_days=2&timezone=auto";
+  h.begin(c,url);
+  h.setTimeout(10000);
+  int code=h.GET();
+  if(code!=200){ Serial.printf("[WX] HTTP %d\n",code); h.end(); return false; }
+  String body=h.getString(); h.end();
+
+  DynamicJsonDocument doc(2048);
+  if(deserializeJson(doc,body)!=DeserializationError::Ok){
+    Serial.println("[WX] JSON-Fehler"); return false;
+  }
+  JsonObject d=doc["daily"];
+  if(d.isNull()){ Serial.println("[WX] kein daily-Block"); return false; }
+  for(int i=0;i<2;i++){
+    gWx[i].tmax = d["temperature_2m_max"][i] | 0.0f;
+    gWx[i].tmin = d["temperature_2m_min"][i] | 0.0f;
+    gWx[i].sunH = (d["sunshine_duration"][i] | 0.0f) / 3600.0f;
+    gWx[i].cloud= d["cloud_cover_mean"][i]   | 0.0f;
+    gWx[i].rain = d["precipitation_sum"][i]  | 0.0f;
+  }
+  gWxValid=true;
+  Serial.printf("[WX] heute %.0f/%.0f C  %.1f h Sonne  %.0f%% Wolken  %.1f mm\n",
+                gWx[0].tmax,gWx[0].tmin,gWx[0].sunH,gWx[0].cloud,gWx[0].rain);
+  return true;
+}
+
+static void handleTouch(){
+  static bool     down=false;
+  static int32_t  xMin=0,xMax=0;
+  static uint32_t tStart=0, samples=0;
+  int32_t x,y;
+
+  if(lcd.getTouch(&x,&y)){
+    if(!down){ down=true; xMin=xMax=x; tStart=millis(); samples=0; }
+    if(x<xMin) xMin=x;
+    if(x>xMax) xMax=x;
+    samples++;
+    return;
+  }
+  if(!down) return;
+
+  down=false;
+  uint32_t dur=millis()-tStart;
+  int32_t  span=xMax-xMin;
+
+  // Nur Wischen wechselt die Seite, Antippen nicht - das Geraet haengt an
+  // der Wand und wird beim Abstauben beruehrt. Gemessen wird die groesste
+  // Spanne waehrend der Beruehrung, nicht die Differenz zwischen erstem und
+  // letztem Wert: der CST816S antwortet zeitweise gar nicht, und dann waere
+  // die Differenz null, obwohl gewischt wurde.
+  if(span>30 && dur<1500){
+    gPage = (gPage+1) % PAGES;
+    lcd.fillScreen(C_BLACK);
+    drawDisplay();
+  }
+  LOGF("[TOUCH] Seite %d  abtastungen=%lu strecke=%ld dauer=%lums\n",
+       gPage,(unsigned long)samples,(long)span,(unsigned long)dur);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // LOOP
 // ─────────────────────────────────────────────────────────────────────────────
 static unsigned long lastFetch=0, lastClock=0;
 void loop(){
   unsigned long now=millis();
+  handleTouch();           // Wischgeste auswerten
   server.handleClient();   // Weboberflaeche bedienen
   // MQTT am Leben halten – ohne loop() kommen keine Nachrichten an
   if(gMqtt.connected()){
@@ -2030,6 +2280,13 @@ void loop(){
     drawDisplay(); lastFetch=now;
   }
   // Uhr auch ohne gueltige Daten weiterlaufen lassen
+  // Wetter alle 30 Minuten - das Modell rechnet stuendlich, oefter waere sinnlos
+  if(cfg.lat!=0 || cfg.lon!=0){
+    if(gWxLast==0 || now-gWxLast>=1800000UL){
+      gWxLast=now;
+      fetchWeather();
+    }
+  }
   if(now-lastClock>=30000){
     drawDisplay();
     lastClock=now;
