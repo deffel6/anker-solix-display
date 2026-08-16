@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.14.2"
+#define FW_VERSION "1.16.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -1410,7 +1410,65 @@ bool fetchDeviceInfo(){
   if(code!=200){Serial.printf("[DEV] HTTP %d\n",code);return false;}
   // Innerhalb solarbank_list suchen, damit nicht der Shelly erwischt wird
   int sb=resp.indexOf("\"solarbank_list\":");
-  if(sb<0){Serial.println("[DEV] keine solarbank_list");return false;}
+  if(sb<0){
+    // Ohne Solarbank kein MQTT-Topic. Statt nur abzubrechen zeigen wir, was
+    // die Anlage stattdessen enthaelt - das Projekt kennt bisher nur die
+    // Solarbank, und ohne die Antwort laesst sich nicht sagen, was fehlt.
+    Serial.println("[DEV] keine solarbank_list. Gefundene Geraetelisten:");
+    int i=0, n=0;
+    while(true){
+      int k=resp.indexOf("_list\":",i);
+      if(k<0) break;
+      int st=resp.lastIndexOf('"',k);        // Anfang des Schluesselnamens
+      if(st>=0){
+        String key=resp.substring(st+1,k+5);
+        // Ist die Liste leer oder gefuellt?
+        int br=resp.indexOf('[',k);
+        bool leer = (br>=0 && resp.indexOf(']',br)==br+1);
+        Serial.printf("   %-24s %s\n",key.c_str(),leer?"leer":"GEFUELLT");
+        n++;
+      }
+      i=k+5;
+    }
+    if(!n) Serial.println("   keine einzige gefunden");
+    printLong("DEV",resp);
+
+    // Rueckfallweg: get_relate_and_bind_devices listet die Geraete des
+    // KONTOS statt der Anlage. Bei geteilten Konten oder frisch angelegten
+    // Anlagen fehlt die Solarbank in get_site_detail, steht dort aber drin.
+    Serial.println("[DEV] Zweitversuch ueber die Geraeteliste des Kontos");
+    String r2;
+    if(rawPost("power_service/v1/app/get_relate_and_bind_devices","{}",r2)!=200){
+      Serial.println("[DEV] auch das misslang");
+      return false;
+    }
+    printLong("DEV2",r2);   // Antwort zeigen, nicht nur auswerten
+    // Erste Solarbank suchen. Alle Modelle der Reihe beginnen mit A17C.
+    int pos=0;
+    while(true){
+      int k=r2.indexOf("\"product_code\":\"A17C",pos);
+      if(k<0) break;
+      String tail2=r2.substring(k);
+      gDevPn=jsonStr(tail2,"product_code");
+      // device_sn steht im selben Objekt, aber VOR product_code
+      int objStart=r2.lastIndexOf('{',k);
+      if(objStart>=0) gDevSn=jsonStr(r2.substring(objStart),"device_sn");
+      if(gDevSn.length()){
+        Serial.printf("[DEV] gefunden: %s  %s  (%s)\n",
+                      gDevPn.c_str(),gDevSn.c_str(),
+                      jsonStr(tail2,"device_name").c_str());
+        applyGridScale();
+        return true;
+      }
+      pos=k+20;
+    }
+    Serial.println("[DEV] keine Solarbank im Konto gefunden");
+
+    // Ein dritter Versuch ueber app/devicerelation/get_shared_device
+    // entfaellt: der Endpunkt verlangt die Seriennummer als Parameter, also
+    // genau das, was hier gesucht wird. Geprueft, liefert HTTP 400.
+    return false;
+  }
   String tail=resp.substring(sb);
   gDevPn=jsonStr(tail,"device_pn");
   gDevSn=jsonStr(tail,"device_sn");
@@ -2105,7 +2163,11 @@ static void handleTouch(){
   // Spanne waehrend der Beruehrung, nicht die Differenz zwischen erstem und
   // letztem Wert: der CST816S antwortet zeitweise gar nicht, und dann waere
   // die Differenz null, obwohl gewischt wurde.
-  if(span>30 && dur<1500){
+  // Obergrenze 2500 ms statt 1500: eine gemessene Wischbewegung dauerte
+  // 1018 ms, das lag zu dicht an der Grenze. Bedaechtiges Wischen fiel sonst
+  // wortlos durch. Ein versehentlich aufgelegter Handballen dauert laenger
+  // und wird weiterhin abgewiesen.
+  if(span>30 && dur<2500){
     gPage = (gPage+1) % PAGES;
     lcd.fillScreen(C_BLACK);
     drawDisplay();
