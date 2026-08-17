@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.11.1"
+#define FW_VERSION "1.13.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -141,6 +141,9 @@ struct Config {
   // Nachtabschaltung: Minuten seit Mitternacht; -1 = ausgeschaltet.
   // Das Fenster darf ueber Mitternacht reichen (z.B. 22:30 bis 06:00).
   int    nightFrom = -1, nightTo = -1;
+  // Standort fuer die Wettervorhersage. 0/0 = noch nicht gesetzt, dann
+  // bleibt die Wetterseite leer.
+  float  lat = 0, lon = 0;
 };
 static Config cfg;
 
@@ -150,6 +153,20 @@ struct AnkerData {
   bool  valid=false;
 };
 static AnkerData gData;
+
+// Angezeigte Seite: 0 = Messwerte, 1 = Wetter. Ohne Touch wird ueber die
+// Weboberflaeche umgeschaltet; der Stand ueberdauert Neustarts bewusst nicht.
+static int gPage = 0;
+#define PAGES 2
+
+// ── Wettervorhersage ────────────────────────────────────────────────────────
+// Quelle: open-meteo.com - kostenlos, ohne Anmeldung und ohne Schluessel.
+// Das ist der Grund fuer die Wahl: wer das Projekt nachbaut, muss sich
+// nirgends registrieren.
+struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
+static WxDay         gWx[2];
+static bool          gWxValid = false;
+static unsigned long gWxLast  = 0;
 
 static String        gAuthToken   = "";
 static String        gGtoken      = "";
@@ -467,6 +484,8 @@ void loadConfig() {
   cfg.bright    =prefs.getInt("bright",200);
   cfg.nightFrom =prefs.getInt("nfrom",-1);
   cfg.nightTo   =prefs.getInt("nto",-1);
+  cfg.lat       =prefs.getFloat("lat",0);
+  cfg.lon       =prefs.getFloat("lon",0);
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
@@ -482,6 +501,8 @@ void saveConfig() {
   prefs.putInt("bright",cfg.bright);
   prefs.putInt("nfrom",cfg.nightFrom);
   prefs.putInt("nto",cfg.nightTo);
+  prefs.putFloat("lat",cfg.lat);
+  prefs.putFloat("lon",cfg.lon);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -651,6 +672,7 @@ static int rawPost(const String& path, const String& body, String& outResp);
 void drawDisplay();
 static void applyGridScale();
 void handleSave();
+bool fetchWeather();
 
 // Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
 // leer, weil sie sonst nur beim Einrichten gefuellt wird.
@@ -691,7 +713,7 @@ void handleStatus(){
   // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
   // static, nicht auf dem Stack: der Task-Stack ist knapp bemessen, und der
   // Webserver ruft die Funktion ohnehin nie verschachtelt auf.
-  static char b[6144];
+  static char b[7168];
   const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
   // Nachtfenster als HH:MM fuer die Zeitfelder; unkonfiguriert = Vorschlag
   char nf[6]="22:00", nt[6]="06:00";
@@ -758,6 +780,21 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
     "(aktuell %d&deg;)</p>"
     "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Anzeige auf dem Display: "
+    "<a style='color:%s' href='/page?v=0'>Messwerte</a> &middot; "
+    "<a style='color:%s' href='/page?v=1'>Wetter</a></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Standort f&uuml;rs Wetter: "
+    "<form style='display:inline' action='/geo'>"
+    "<input name='lat' type='number' step='0.0001' value='%.4f' placeholder='Breite' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<input name='lon' type='number' step='0.0001' value='%.4f' placeholder='L&auml;nge' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
+    "color:#f0a500;cursor:pointer'>setzen</button></form></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
     "Helligkeit: "
     "<form style='display:inline' action='/bright'>"
     "<input name='v' type='range' min='5' max='255' value='%d' "
@@ -797,6 +834,8 @@ void handleStatus(){
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
     cfg.battWh, cfg.rotation*90,
+    gPage==0?"#fff":"#f0a500", gPage==1?"#fff":"#f0a500",
+    cfg.lat, cfg.lon,
     cfg.bright, cfg.bright, nf, nt,
     cfg.nightFrom>=0
       ? "<a style='color:#f0a500' href='/night?off=1'>ausschalten</a>"
@@ -898,6 +937,32 @@ static void applyBrightness(){
   lcd.setBrightness(gNight?0:cfg.bright);
 }
 
+// Seite auf dem Display umschalten. Ohne Touch ist die Weboberflaeche der
+// einzige Schalter; die Wahl wirkt sofort.
+void handlePage(){
+  int v=server.arg("v").toInt();
+  if(v>=0 && v<PAGES){
+    gPage=v;
+    lcd.fillScreen(C_BLACK);
+    drawDisplay();
+    Serial.printf("[LCD] Seite %d\n",v);
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Standort fuer die Wettervorhersage setzen und sofort abrufen.
+void handleGeo(){
+  float la=server.arg("lat").toFloat(), lo=server.arg("lon").toFloat();
+  if(la>=-90 && la<=90 && lo>=-180 && lo<=180 && (la!=0 || lo!=0)){
+    cfg.lat=la; cfg.lon=lo; saveConfig();
+    Serial.printf("[WX] Standort %.4f / %.4f\n",la,lo);
+    fetchWeather();
+    gWxLast=millis();
+    if(gPage==1){ lcd.fillScreen(C_BLACK); drawDisplay(); }
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 // Schieberegler der Startseite. Wirkt sofort und ueberdauert Neustarts.
 void handleBright(){
   int v=server.arg("v").toInt();
@@ -974,6 +1039,8 @@ void startWebUi(){
   server.on("/rotate",     HTTP_GET,  handleRotate);
   server.on("/bright",     HTTP_GET,  handleBright);
   server.on("/night",      HTTP_GET,  handleNight);
+  server.on("/page",       HTTP_GET,  handlePage);
+  server.on("/geo",        HTTP_GET,  handleGeo);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -1946,7 +2013,7 @@ bool fetchData(){
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPLAY ZEICHNEN
 // ─────────────────────────────────────────────────────────────────────────────
-void drawDisplay(){
+static void drawMain(){
   bool useSprite=spr.getBuffer()!=nullptr;
   lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
   g->fillScreen(C_BLACK);
@@ -2032,6 +2099,110 @@ void drawDisplay(){
   g->drawString(buf,120,192);
 
   if(useSprite) spr.pushSprite(0,0);
+}
+
+// Wetterseite: Vorhersage fuer heute und morgen. Zeilenweise beschriftet,
+// zwei Spalten - so bleibt jede Zeile schmal genug fuer den runden Schirm.
+static void drawWeather(){
+  bool useSprite=spr.getBuffer()!=nullptr;
+  lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
+  g->fillScreen(C_BLACK);
+  g->setTextDatum(lgfx::TC_DATUM);
+  char b[20];
+
+  struct tm ti;
+  if(getLocalTime(&ti)){
+    char t[6];
+    strftime(t,sizeof(t),"%H:%M",&ti);
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_WHITE,C_BLACK);
+    g->drawString(t,120,12);
+  }
+
+  if(cfg.lat==0 && cfg.lon==0){
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+    g->drawString("WETTER",120,86);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString("Standort fehlt",120,116);
+    g->drawString("im Browser eintragen",120,138);
+    if(useSprite) spr.pushSprite(0,0);
+    return;
+  }
+  if(!gWxValid){
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+    g->drawString("WETTER",120,96);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString("keine Daten",120,126);
+    if(useSprite) spr.pushSprite(0,0);
+    return;
+  }
+
+  g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+  g->drawString("HEUTE",104,46);
+  g->drawString("MORGEN",180,46);
+
+  const char* lbl[4]={"GRAD","SONNE","WOLKE","REGEN"};
+  for(int r=0;r<4;r++){
+    int y=74+r*29;
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->setTextDatum(lgfx::TL_DATUM);
+    g->drawString(lbl[r],24,y+3);
+    g->setTextDatum(lgfx::TC_DATUM);
+    g->setFont(&fonts::FreeSansBold12pt7b);
+    for(int d=0;d<2;d++){
+      WxDay& w=gWx[d];
+      uint32_t col=C_WHITE;
+      switch(r){
+        case 0: snprintf(b,sizeof(b),"%.0f/%.0f",w.tmax,w.tmin); break;
+        case 1: snprintf(b,sizeof(b),"%.1fh",w.sunH);  col=C_YELLOW; break;
+        case 2: snprintf(b,sizeof(b),"%.0f%%",w.cloud); col=w.cloud>60?C_GRAY:C_WHITE; break;
+        default:snprintf(b,sizeof(b),"%.1fmm",w.rain);  col=w.rain>0.5f?C_BLUE:C_GRAY; break;
+      }
+      g->setTextColor(col,C_BLACK);
+      g->drawString(b, d?180:104, y);
+    }
+  }
+  if(useSprite) spr.pushSprite(0,0);
+}
+
+void drawDisplay(){
+  if(gPage==1) drawWeather();
+  else         drawMain();
+}
+
+// Holt die Vorhersage fuer heute und morgen von open-meteo.com. Wird alle
+// 30 Minuten aufgefrischt - das Modell rechnet stuendlich, oefter waere
+// sinnlos.
+bool fetchWeather(){
+  if(cfg.lat==0 && cfg.lon==0) return false;
+  WiFiClientSecure c; c.setInsecure();
+  HTTPClient h;
+  String url = "https://api.open-meteo.com/v1/forecast?latitude="+String(cfg.lat,4)
+             + "&longitude="+String(cfg.lon,4)
+             + "&daily=temperature_2m_max,temperature_2m_min,sunshine_duration,"
+               "cloud_cover_mean,precipitation_sum&forecast_days=2&timezone=auto";
+  h.begin(c,url);
+  h.setTimeout(10000);
+  int code=h.GET();
+  if(code!=200){ Serial.printf("[WX] HTTP %d\n",code); h.end(); return false; }
+  String body=h.getString(); h.end();
+
+  DynamicJsonDocument doc(2048);
+  if(deserializeJson(doc,body)!=DeserializationError::Ok){
+    Serial.println("[WX] JSON-Fehler"); return false;
+  }
+  JsonObject d=doc["daily"];
+  if(d.isNull()){ Serial.println("[WX] kein daily-Block"); return false; }
+  for(int i=0;i<2;i++){
+    gWx[i].tmax = d["temperature_2m_max"][i] | 0.0f;
+    gWx[i].tmin = d["temperature_2m_min"][i] | 0.0f;
+    gWx[i].sunH = (d["sunshine_duration"][i] | 0.0f) / 3600.0f;
+    gWx[i].cloud= d["cloud_cover_mean"][i]   | 0.0f;
+    gWx[i].rain = d["precipitation_sum"][i]  | 0.0f;
+  }
+  gWxValid=true;
+  Serial.printf("[WX] heute %.0f/%.0f C  %.1f h Sonne  %.0f%% Wolken  %.1f mm\n",
+                gWx[0].tmax,gWx[0].tmin,gWx[0].sunH,gWx[0].cloud,gWx[0].rain);
+  return true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2124,6 +2295,14 @@ void loop(){
   if(now-lastFetch>=2000){
     if(WiFi.status()!=WL_CONNECTED){WiFi.reconnect();delay(3000);}
     drawDisplay(); lastFetch=now;
+  }
+  // Wetter alle 30 Minuten - das Modell rechnet stuendlich, oefter waere
+  // sinnlos. Der erste Abruf passiert beim ersten Schleifendurchlauf.
+  if(cfg.lat!=0 || cfg.lon!=0){
+    if(gWxLast==0 || now-gWxLast>=1800000UL){
+      gWxLast=now;
+      fetchWeather();
+    }
   }
   // Nachtabschaltung: einmal pro Minute pruefen reicht. Bei Aenderungen
   // ueber die Weboberflaeche greift applyBrightness() dort sofort.
