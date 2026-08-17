@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.15.0"
+#define FW_VERSION "1.16.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -2245,9 +2245,13 @@ void drawDisplay(){
 // sinnlos.
 bool fetchWeather(){
   if(cfg.lat==0 && cfg.lon==0) return false;
-  WiFiClientSecure c; c.setInsecure();
+  // Bewusst unverschluesselt: parallel zur stehenden MQTT-TLS-Verbindung
+  // reicht der Speicher des C3 nicht fuer einen zweiten TLS-Handshake -
+  // genau beim Abruf ist das Geraet abgestuerzt. Wetterdaten sind
+  // oeffentlich, HTTP genuegt; die API antwortet ohne Umleitung.
+  WiFiClient c;
   HTTPClient h;
-  String url = "https://api.open-meteo.com/v1/forecast?latitude="+String(cfg.lat,4)
+  String url = "http://api.open-meteo.com/v1/forecast?latitude="+String(cfg.lat,4)
              + "&longitude="+String(cfg.lon,4)
              + "&daily=temperature_2m_max,temperature_2m_min,sunshine_duration,"
                "cloud_cover_mean,precipitation_sum"
