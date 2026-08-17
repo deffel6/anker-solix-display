@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.17.0"
+#define FW_VERSION "1.18.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -145,6 +145,9 @@ struct Config {
   // Standort fuer die Wettervorhersage. 0/0 = noch nicht gesetzt, dann
   // bleibt die Wetterseite leer.
   float  lat = 0, lon = 0;
+  // Seriennummer der gewaehlten Solarbank. Leer = automatisch (dekodierte
+  // Generationen zuerst); gesetzt wird sie ueber die Weboberflaeche.
+  String devSn;
 };
 static Config cfg;
 
@@ -188,6 +191,11 @@ static String gMqttHost, gMqttThing;          // Broker + Client-Kennung
 static String gMqttCert, gMqttKey, gMqttCa;   // PEM, echte Zeilenumbrueche
 static String gMqttCertId, gMqttUserId;       // fuer die Publish-client_id
 static String gDevSn, gDevPn;                 // Solarbank der gewaehlten Anlage
+// Alle Solarbanks der Anlage, fuer die Geraeteauswahl auf der Weboberflaeche
+#define MAX_BANKS 4
+struct BankEntry { String pn, sn, name; };
+static BankEntry gBanks[MAX_BANKS];
+static int       gBankCount=0;
 static String gGridSn, gGridPn;               // Netzzaehler
 // Teiler fuer die Rohwerte des Zaehlers – die Einheit ist geraeteabhaengig
 static float  gGridScale = 1.0f;
@@ -488,6 +496,7 @@ void loadConfig() {
   cfg.nightTo   =prefs.getInt("nto",-1);
   cfg.lat       =prefs.getFloat("lat",0);
   cfg.lon       =prefs.getFloat("lon",0);
+  cfg.devSn     =prefs.getString("devsn","");
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
@@ -505,6 +514,7 @@ void saveConfig() {
   prefs.putInt("nto",cfg.nightTo);
   prefs.putFloat("lat",cfg.lat);
   prefs.putFloat("lon",cfg.lon);
+  prefs.putString("devsn",cfg.devSn);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -715,7 +725,7 @@ void handleStatus(){
   // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
   // static, nicht auf dem Stack: der Task-Stack ist knapp bemessen, und der
   // Webserver ruft die Funktion ohnehin nie verschachtelt auf.
-  static char b[7168];
+  static char b[8192];
   const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
   // Nachtfenster als HH:MM fuer die Zeitfelder; unkonfiguriert = Vorschlag
   char nf[6]="22:00", nt[6]="06:00";
@@ -727,6 +737,19 @@ void handleStatus(){
     snprintf(latS,sizeof(latS),"%.4f",cfg.lat);
     snprintf(lonS,sizeof(lonS),"%.4f",cfg.lon);
   }
+  // Solarbank-Auswahl: ein Link je gefundenem Geraet, das aktive in Weiss.
+  // Als String vorgebaut, weil die Anzahl der Geraete variabel ist.
+  String bankRow;
+  for(int i=0;i<gBankCount;i++){
+    bool cur = gBanks[i].sn==gDevSn;
+    bankRow += String("<a style='color:")+(cur?"#fff":"#f0a500")
+             + "' href='/device?sn="+gBanks[i].sn+"'>"+gBanks[i].pn
+             + " &middot; &hellip;"+gBanks[i].sn.substring(
+                 gBanks[i].sn.length()>4?gBanks[i].sn.length()-4:0)
+             + "</a>";
+    if(i<gBankCount-1) bankRow += " &nbsp;|&nbsp; ";
+  }
+  if(!gBankCount) bankRow = "keine gefunden";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -788,6 +811,9 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
     "(aktuell %d&deg;)</p>"
     "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Solarbank der Anlage: %s "
+    "<span style='color:#555'>(Wechsel startet das Ger&auml;t neu)</span></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
     "Anzeige auf dem Display: "
     "<a style='color:%s' href='/page?v=0'>Messwerte</a> &middot; "
     "<a style='color:%s' href='/page?v=1'>Wetter</a></p>"
@@ -842,6 +868,7 @@ void handleStatus(){
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
     cfg.battWh, cfg.rotation*90,
+    bankRow.c_str(),
     gPage==0?"#fff":"#f0a500", gPage==1?"#fff":"#f0a500",
     latS, lonS,
     cfg.bright, cfg.bright, nf, nt,
@@ -943,6 +970,22 @@ static bool nightActive(){
 static void applyBrightness(){
   gNight=nightActive();
   lcd.setBrightness(gNight?0:cfg.bright);
+}
+
+// Solarbank der Anlage wechseln. Danach Neustart: MQTT-Abos und das Ziel
+// des Echtzeit-Triggers haengen an der Seriennummer, ein sauberer Neuaufbau
+// ist einfacher und sicherer als Umabonnieren im laufenden Betrieb.
+void handleDevice(){
+  String sn=server.arg("sn");
+  bool known=false;
+  for(int i=0;i<gBankCount;i++) if(gBanks[i].sn==sn) known=true;
+  if(known && sn!=gDevSn){
+    cfg.devSn=sn; saveConfig();
+    Serial.printf("[DEV] Solarbank gewechselt auf %s - Neustart\n",sn.c_str());
+    server.send(200,"text/html; charset=utf-8",FPSTR(HTML_SAVED));
+    delay(2500); ESP.restart(); return;
+  }
+  server.sendHeader("Location","/"); server.send(302);
 }
 
 // Seite auf dem Display umschalten. Ohne Touch ist die Weboberflaeche der
@@ -1064,6 +1107,7 @@ void startWebUi(){
   server.on("/night",      HTTP_GET,  handleNight);
   server.on("/page",       HTTP_GET,  handlePage);
   server.on("/geo",        HTTP_GET,  handleGeo);
+  server.on("/device",     HTTP_GET,  handleDevice);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -1564,8 +1608,11 @@ bool fetchMqttCreds(){
 // GERAETESUCHE – device_sn + product_code fuers MQTT-Topic:
 //   dt/{app_name}/{product_code}/{device_sn}/
 // ─────────────────────────────────────────────────────────────────────────────
-// Solarbank der gewaehlten Anlage bestimmen. get_site_detail liefert genau
-// die Geraete dieser site_id – solarbank_list[0] ist die Solarbank.
+// Alle Solarbanks der gewaehlten Anlage einsammeln. get_site_detail liefert
+// genau die Geraete dieser site_id. Bisher wurde stumpf solarbank_list[0]
+// genommen - bei Anlagen mit mehreren Speichern (z.B. alte E1600 neben der
+// aktuellen Bank) lauschte das Display dann am falschen Geraet und bekam
+// nie param_info-Nachrichten.
 bool fetchDeviceInfo(){
   Serial.println("=== GERAET ===");
   String resp;
@@ -1573,14 +1620,49 @@ bool fetchDeviceInfo(){
                    String("{\"site_id\":\"")+gSiteId+"\"}",resp);
   if(code!=200){Serial.printf("[DEV] HTTP %d\n",code);return false;}
   // Innerhalb solarbank_list suchen, damit nicht der Shelly erwischt wird
-  int sb=resp.indexOf("\"solarbank_list\":");
+  int sb=resp.indexOf("\"solarbank_list\":[");
   if(sb<0){Serial.println("[DEV] keine solarbank_list");return false;}
-  String tail=resp.substring(sb);
-  gDevPn=jsonStr(tail,"device_pn");
-  gDevSn=jsonStr(tail,"device_sn");
-  Serial.printf("[DEV] %s  %s  (%s)\n",
-                gDevPn.c_str(),gDevSn.c_str(),
-                jsonStr(tail,"device_name").c_str());
+  // Array-Segment mit Klammerzaehler ausschneiden - die Eintraege koennen
+  // selbst Arrays enthalten, ein simples indexOf("]") griffe zu kurz.
+  int a=resp.indexOf('[',sb), depth=0, e=a;
+  for(; e<(int)resp.length(); e++){
+    if(resp[e]=='[') depth++;
+    else if(resp[e]==']'){ depth--; if(depth==0) break; }
+  }
+  String seg=resp.substring(a,e+1);
+  gBankCount=0;
+  int pos=0;
+  while(gBankCount<MAX_BANKS){
+    int p=seg.indexOf("\"device_sn\"",pos);
+    if(p<0) break;
+    // Objektgrenzen grob: ab dem letzten '{' vor dem Fund bis zum Feldende
+    int os=seg.lastIndexOf('{',p);
+    String obj=seg.substring(os<0?0:os, seg.length());
+    gBanks[gBankCount].sn  =jsonStr(obj,"device_sn");
+    gBanks[gBankCount].pn  =jsonStr(obj,"device_pn");
+    gBanks[gBankCount].name=jsonStr(obj,"device_name");
+    if(gBanks[gBankCount].sn.length()) gBankCount++;
+    pos=p+11;
+  }
+  // Auswahl: 1. vom Nutzer festgelegte Seriennummer, 2. dekodierte
+  // Generationen (A17C5 zuerst, dann Solarbank 2), 3. der erste Eintrag.
+  int pick=-1;
+  for(int i=0;i<gBankCount;i++)
+    if(cfg.devSn.length() && gBanks[i].sn==cfg.devSn) pick=i;
+  if(pick<0){
+    const char* pref[]={"A17C5","A17C1","A17C3"};
+    for(int p2=0;p2<3 && pick<0;p2++)
+      for(int i=0;i<gBankCount && pick<0;i++)
+        if(gBanks[i].pn.startsWith(pref[p2])) pick=i;
+  }
+  if(pick<0 && gBankCount) pick=0;
+  for(int i=0;i<gBankCount;i++)
+    Serial.printf("[DEV] Solarbank %d: %s  %s  (%s)%s\n", i+1,
+                  gBanks[i].pn.c_str(), gBanks[i].sn.c_str(),
+                  gBanks[i].name.c_str(), i==pick?"  << gewaehlt":"");
+  if(pick<0){Serial.println("[DEV] keine Solarbank gefunden");return false;}
+  gDevPn=gBanks[pick].pn;
+  gDevSn=gBanks[pick].sn;
   // Netzzaehler aus grid_list – der misst den Netzbezug, nicht die Solarbank
   int gl=resp.indexOf("\"grid_list\":");
   if(gl>=0){
