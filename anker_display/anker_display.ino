@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.14.0"
+#define FW_VERSION "1.15.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -720,6 +720,12 @@ void handleStatus(){
   char nf[6]="22:00", nt[6]="06:00";
   if(cfg.nightFrom>=0) snprintf(nf,sizeof(nf),"%02d:%02d",cfg.nightFrom/60,cfg.nightFrom%60);
   if(cfg.nightTo>=0)   snprintf(nt,sizeof(nt),"%02d:%02d",cfg.nightTo/60,cfg.nightTo%60);
+  // Standort als Text mit Punkt; leer statt "0.0000", solange keiner gesetzt ist
+  char latS[12]="", lonS[12]="";
+  if(cfg.lat!=0 || cfg.lon!=0){
+    snprintf(latS,sizeof(latS),"%.4f",cfg.lat);
+    snprintf(lonS,sizeof(lonS),"%.4f",cfg.lon);
+  }
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -785,12 +791,12 @@ void handleStatus(){
     "<a style='color:%s' href='/page?v=0'>Messwerte</a> &middot; "
     "<a style='color:%s' href='/page?v=1'>Wetter</a></p>"
     "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
-    "Standort f&uuml;rs Wetter: "
+    "Standort f&uuml;rs Wetter (z.B. 51.5467 / 6.6006): "
     "<form style='display:inline' action='/geo'>"
-    "<input name='lat' type='number' step='0.0001' value='%.4f' placeholder='Breite' "
+    "<input name='lat' type='text' inputmode='decimal' value='%s' placeholder='Breite' "
     "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
     "border-radius:6px;color:#eee'> "
-    "<input name='lon' type='number' step='0.0001' value='%.4f' placeholder='L&auml;nge' "
+    "<input name='lon' type='text' inputmode='decimal' value='%s' placeholder='L&auml;nge' "
     "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
     "border-radius:6px;color:#eee'> "
     "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
@@ -836,7 +842,7 @@ void handleStatus(){
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
     cfg.battWh, cfg.rotation*90,
     gPage==0?"#fff":"#f0a500", gPage==1?"#fff":"#f0a500",
-    cfg.lat, cfg.lon,
+    latS, lonS,
     cfg.bright, cfg.bright, nf, nt,
     cfg.nightFrom>=0
       ? "<a style='color:#f0a500' href='/night?off=1'>ausschalten</a>"
@@ -951,15 +957,30 @@ void handlePage(){
   server.sendHeader("Location","/"); server.send(302);
 }
 
-// Standort fuer die Wettervorhersage setzen und sofort abrufen.
+// Standort fuer die Wettervorhersage setzen. Kommt mit Komma und Punkt
+// zurecht - deutsche Browser liefern je nach Feldtyp beides. Werte nahe
+// 0/0 (Golf von Guinea) sind mit Sicherheit ein Eingabefehler und werden
+// verworfen, statt die Wetterseite an einen falschen Ort zu haengen.
+//
+// Der Abruf selbst passiert NICHT hier: eine TLS-Verbindung blockiert den
+// Webserver mehrere Sekunden, und genau dann laeuft das automatische
+// Neuladen der Seite ins Leere. Stattdessen wird nur gWxLast genullt -
+// loop() holt die Vorhersage dann beim naechsten Durchlauf.
 void handleGeo(){
-  float la=server.arg("lat").toFloat(), lo=server.arg("lon").toFloat();
-  if(la>=-90 && la<=90 && lo>=-180 && lo<=180 && (la!=0 || lo!=0)){
+  String fs=server.arg("lat"), ts=server.arg("lon");
+  fs.replace(',','.'); ts.replace(',','.');
+  float la=fs.toFloat(), lo=ts.toFloat();
+  bool ok = la>=-90 && la<=90 && lo>=-180 && lo<=180
+            && !(fabsf(la)<1 && fabsf(lo)<1);
+  if(ok){
     cfg.lat=la; cfg.lon=lo; saveConfig();
     Serial.printf("[WX] Standort %.4f / %.4f\n",la,lo);
-    fetchWeather();
-    gWxLast=millis();
+    gWxValid=false;
+    gWxLast=0;
     if(gPage==1){ lcd.fillScreen(C_BLACK); drawDisplay(); }
+  } else {
+    Serial.printf("[WX] Standort verworfen: '%s' / '%s'\n",
+                  server.arg("lat").c_str(),server.arg("lon").c_str());
   }
   server.sendHeader("Location","/"); server.send(302);
 }
