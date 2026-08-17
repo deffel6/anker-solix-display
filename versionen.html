@@ -131,9 +131,22 @@
   <div class="lane beta">Beta-Linie <span style="text-transform:none;letter-spacing:0">&ndash; ohne Touch, f&uuml;r Ger&auml;te an der Wand</span></div>
 
   <div class="card">
-    <div class="vrow"><span class="vnum">1.15.0 &ndash; 1.16.0</span>
+    <div class="vrow"><span class="vnum">1.17.0</span>
       <span class="vdate">17. August 2026</span>
       <span class="badge beta">Aktuelle Beta</span></div>
+    <ul>
+      <li>Watchdog: haengt das Ger&auml;t l&auml;nger als 60 Sekunden,
+          startet es von selbst neu &ndash; gegen das Einfrieren nach
+          mehreren Stunden Betrieb</li>
+      <li>Speicherwache: bei zerst&uuml;ckeltem Speicher kontrollierter
+          Neustart, bevor es zum H&auml;nger kommt; Heap-Stand alle
+          10 Minuten im seriellen Log</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.15.0 &ndash; 1.16.0</span>
+      <span class="vdate">17. August 2026</span></div>
     <ul>
       <li>Standort-Eingabe robust: Komma und Punkt erlaubt, unplausible
           Werte nahe 0/0 werden verworfen</li>
