@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.13.0"
+#define FW_VERSION "1.13.1"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -2101,8 +2101,46 @@ static void drawMain(){
   if(useSprite) spr.pushSprite(0,0);
 }
 
-// Wetterseite: Vorhersage fuer heute und morgen. Zeilenweise beschriftet,
-// zwei Spalten - so bleibt jede Zeile schmal genug fuer den runden Schirm.
+// ── Wetter-Piktogramme ──────────────────────────────────────────────────────
+// Aus Kreisen, Rechtecken und Linien gezeichnet - die GFX-Schriften
+// enthalten keine Wettersymbole. u ist die Grundgroesse in Pixeln.
+static void icSun(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t col){
+  g->fillCircle(cx,cy,u,col);
+  static const int8_t d[8][2]={{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+  for(int i=0;i<8;i++){
+    int f=(i<4)?10:7;                  // Diagonalstrahlen kuerzen (~1/sqrt2)
+    int x1=cx+d[i][0]*(u+3)*f/10, y1=cy+d[i][1]*(u+3)*f/10;
+    int x2=cx+d[i][0]*(u+7)*f/10, y2=cy+d[i][1]*(u+7)*f/10;
+    g->drawLine(x1,y1,x2,y2,col);
+    g->drawLine(x1+1,y1,x2+1,y2,col);  // zweite Linie macht den Strahl dicker
+  }
+}
+static void icCloud(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t col){
+  g->fillCircle(cx-u,cy,u*3/4,col);
+  g->fillCircle(cx+u,cy,u*3/4,col);
+  g->fillCircle(cx-u/4,cy-u/2,u,col);
+  g->fillRect(cx-u,cy-u/4,2*u,u,col);
+}
+static void icSunCloud(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t sun,uint32_t cloud){
+  icSun(g,cx-u/2,cy-u/2,u*2/3,sun);    // Sonne lugt oben links hervor
+  icCloud(g,cx+u/4,cy+u/3,u*3/4,cloud);
+}
+static void icRain(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t cloud,uint32_t drop){
+  icCloud(g,cx,cy-u/3,u,cloud);
+  for(int i=-1;i<=1;i++){              // drei schraege Tropfenstriche
+    int x=cx+i*u*3/4, y=cy+u*2/3;
+    g->drawLine(x,y,x-2,y+u/2,drop);
+    g->drawLine(x+1,y,x-1,y+u/2,drop);
+  }
+}
+static void icDrop(lgfx::LovyanGFX* g,int cx,int cy,uint32_t col){
+  g->fillTriangle(cx,cy-7,cx-3,cy,cx+3,cy,col);
+  g->fillCircle(cx,cy,3,col);
+}
+
+// Wetterseite: Vorhersage fuer heute und morgen. Je Tag ein grosses Symbol
+// nach Lage (Regen schlaegt Wolken, Wolken schlagen Sonne), darunter
+// Hoechst-/Tiefsttemperatur, Sonnenstunden und Regenmenge.
 static void drawWeather(){
   bool useSprite=spr.getBuffer()!=nullptr;
   lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
@@ -2137,29 +2175,31 @@ static void drawWeather(){
   }
 
   g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_ORANGE,C_BLACK);
-  g->drawString("HEUTE",104,46);
-  g->drawString("MORGEN",180,46);
+  g->drawString("HEUTE",68,42);
+  g->drawString("MORGEN",172,42);
+  g->drawFastVLine(120,48,136,lcd.color888(45,45,45));
 
-  const char* lbl[4]={"GRAD","SONNE","WOLKE","REGEN"};
-  for(int r=0;r<4;r++){
-    int y=74+r*29;
-    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
-    g->setTextDatum(lgfx::TL_DATUM);
-    g->drawString(lbl[r],24,y+3);
-    g->setTextDatum(lgfx::TC_DATUM);
-    g->setFont(&fonts::FreeSansBold12pt7b);
-    for(int d=0;d<2;d++){
-      WxDay& w=gWx[d];
-      uint32_t col=C_WHITE;
-      switch(r){
-        case 0: snprintf(b,sizeof(b),"%.0f/%.0f",w.tmax,w.tmin); break;
-        case 1: snprintf(b,sizeof(b),"%.1fh",w.sunH);  col=C_YELLOW; break;
-        case 2: snprintf(b,sizeof(b),"%.0f%%",w.cloud); col=w.cloud>60?C_GRAY:C_WHITE; break;
-        default:snprintf(b,sizeof(b),"%.1fmm",w.rain);  col=w.rain>0.5f?C_BLUE:C_GRAY; break;
-      }
-      g->setTextColor(col,C_BLACK);
-      g->drawString(b, d?180:104, y);
-    }
+  for(int d=0;d<2;d++){
+    int cx = d?172:68;
+    WxDay& w=gWx[d];
+    if(w.rain>=1.0f)    icRain(g,cx,84,13,C_GRAY,C_BLUE);
+    else if(w.cloud>65) icCloud(g,cx,84,13,C_GRAY);
+    else if(w.cloud>25) icSunCloud(g,cx,84,13,C_YELLOW,C_GRAY);
+    else                icSun(g,cx,84,14,C_YELLOW);
+
+    snprintf(b,sizeof(b),"%.0f/%.0f",w.tmax,w.tmin);
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_WHITE,C_BLACK);
+    g->drawString(b,cx,114);
+
+    icSun(g,cx-34,153,4,C_YELLOW);
+    snprintf(b,sizeof(b),"%.1fh",w.sunH);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_WHITE,C_BLACK);
+    g->drawString(b,cx+4,146);
+
+    icDrop(g,cx-34,177,w.rain>0.5f?C_BLUE:C_GRAY);
+    snprintf(b,sizeof(b),"%.1fmm",w.rain);
+    g->setTextColor(w.rain>0.5f?C_BLUE:C_GRAY,C_BLACK);
+    g->drawString(b,cx+4,170);
   }
   if(useSprite) spr.pushSprite(0,0);
 }
