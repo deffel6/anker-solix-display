@@ -34,7 +34,7 @@ Nach meiner Kenntnis ist das bislang nirgends öffentlich beschrieben.
 ESP32-C3 per USB anschließen und auf der [Installationsseite][pages] auf
 *Installieren* klicken. Läuft in Chrome oder Edge, es wird nichts installiert.
 
-[pages]: https://deffel6.github.io/anker-solix-display/
+[pages]: https://deffel6.github.io/anker-solix-display-beta/
 
 ### Aus dem Quelltext
 
@@ -195,7 +195,7 @@ Fragen, Rückmeldungen oder ein Zählermodell, das noch nicht erkannt wird:
 **esp32.display@gmail.com**
 
 Fehlerberichte gerne auch als
-[Issue](https://github.com/deffel6/anker-solix-display/issues).
+[Issue](https://github.com/deffel6/anker-solix-display-beta/issues).
 
 Das Projekt entsteht in der Freizeit und bleibt kostenlos. Wer etwas dazugeben
 möchte, schreibt einfach an dieselbe Adresse.
