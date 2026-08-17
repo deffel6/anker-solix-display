@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.18.0"
+#define FW_VERSION "1.19.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -167,6 +167,15 @@ static int gPage = 0;
 // Quelle: open-meteo.com - kostenlos, ohne Anmeldung und ohne Schluessel.
 // Das ist der Grund fuer die Wahl: wer das Projekt nachbaut, muss sich
 // nirgends registrieren.
+// ── Update-Anzeige ──────────────────────────────────────────────────────────
+// Kleiner Punkt oben rechts auf dem Display: gruen = aktuell, gelb = neuere
+// Beta verfuegbar, rot = neues Stable-Release erschienen (bis es auf der
+// Weboberflaeche quittiert wird). Geprueft wird gegen die manifest.json der
+// beiden Installer-Seiten - dieselbe Quelle, aus der auch geflasht wird.
+static int    gUpdState    = 0;    // 0=gruen 1=gelb 2=rot
+static String gBetaLatest, gStableLatest, gStableSeen;
+static unsigned long gUpdLast = 0;
+
 struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
 static WxDay         gWx[2];
 static float         gWxRad   = 0;     // aktuelle Globalstrahlung in W/m2
@@ -497,6 +506,7 @@ void loadConfig() {
   cfg.lat       =prefs.getFloat("lat",0);
   cfg.lon       =prefs.getFloat("lon",0);
   cfg.devSn     =prefs.getString("devsn","");
+  gStableSeen   =prefs.getString("seenstab","");
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
@@ -685,6 +695,7 @@ void drawDisplay();
 static void applyGridScale();
 void handleSave();
 bool fetchWeather();
+static int cmpVer(const String& a, const String& b);
 
 // Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
 // leer, weil sie sonst nur beim Einrichten gefuellt wird.
@@ -750,6 +761,19 @@ void handleStatus(){
     if(i<gBankCount-1) bankRow += " &nbsp;|&nbsp; ";
   }
   if(!gBankCount) bankRow = "keine gefunden";
+  // Update-Zeile passend zum Punkt auf dem Display
+  String updRow;
+  if(gUpdState==2)
+    updRow = String("<span style='color:#f66'>&#9679;</span> Neues Stable-Release ")
+           + gStableLatest + " &ndash; "
+             "<a style='color:#f0a500' href='https://deffel6.github.io/anker-solix-display/'>ansehen</a>"
+             " &middot; <a style='color:#f0a500' href='/updok'>quittieren</a>";
+  else if(gUpdState==1)
+    updRow = String("<span style='color:#f0a500'>&#9679;</span> Neue Beta ")
+           + gBetaLatest + " verf&uuml;gbar &ndash; "
+             "<a style='color:#f0a500' href='https://deffel6.github.io/anker-solix-display-beta/'>installieren</a>";
+  else
+    updRow = "<span style='color:#4caf50'>&#9679;</span> Firmware aktuell";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -810,6 +834,7 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/rotate?v=2'>180&deg;</a> &middot; "
     "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
     "(aktuell %d&deg;)</p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>Updates: %s</p>"
     "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
     "Solarbank der Anlage: %s "
     "<span style='color:#555'>(Wechsel startet das Ger&auml;t neu)</span></p>"
@@ -868,6 +893,7 @@ void handleStatus(){
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
     cfg.battWh, cfg.rotation*90,
+    updRow.c_str(),
     bankRow.c_str(),
     gPage==0?"#fff":"#f0a500", gPage==1?"#fff":"#f0a500",
     latS, lonS,
@@ -970,6 +996,21 @@ static bool nightActive(){
 static void applyBrightness(){
   gNight=nightActive();
   lcd.setBrightness(gNight?0:cfg.bright);
+}
+
+// Stable-Hinweis quittieren: der rote Punkt erlischt, bis das naechste
+// Stable-Release erscheint.
+void handleUpdOk(){
+  if(gStableLatest.length()){
+    gStableSeen=gStableLatest;
+    prefs.begin("anker",false);
+    prefs.putString("seenstab",gStableSeen);
+    prefs.end();
+    gUpdState = (gBetaLatest.length() && cmpVer(FW_VERSION,gBetaLatest)<0) ? 1 : 0;
+    drawDisplay();
+    Serial.printf("[UPD] Stable %s quittiert\n",gStableSeen.c_str());
+  }
+  server.sendHeader("Location","/"); server.send(302);
 }
 
 // Solarbank der Anlage wechseln. Danach Neustart: MQTT-Abos und das Ziel
@@ -1108,6 +1149,7 @@ void startWebUi(){
   server.on("/page",       HTTP_GET,  handlePage);
   server.on("/geo",        HTTP_GET,  handleGeo);
   server.on("/device",     HTTP_GET,  handleDevice);
+  server.on("/updok",      HTTP_GET,  handleUpdOk);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -2118,6 +2160,15 @@ bool fetchData(){
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPLAY ZEICHNEN
 // ─────────────────────────────────────────────────────────────────────────────
+// Update-Punkt oben rechts, auf jeder Seite. Position liegt sicher innerhalb
+// des runden Panels (Abstand zum Mittelpunkt ~101 von 120 Pixeln).
+static void drawUpdateDot(lgfx::LovyanGFX* g){
+  uint32_t col = gUpdState==2 ? C_RED
+               : gUpdState==1 ? C_YELLOW
+               :                C_GREEN;
+  g->fillCircle(204,64,5,col);
+}
+
 static void drawMain(){
   bool useSprite=spr.getBuffer()!=nullptr;
   lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
@@ -2203,6 +2254,7 @@ static void drawMain(){
   snprintf(buf,sizeof(buf),"%.0fW",flowVal);
   g->drawString(buf,120,192);
 
+  drawUpdateDot(g);
   if(useSprite) spr.pushSprite(0,0);
 }
 
@@ -2315,6 +2367,7 @@ static void drawWeather(){
   g->drawString(b,126,198);
   icSun(g,126-(int)strlen(b)*5-12,206,4,gWxRad>=1.0f?C_YELLOW:C_GRAY);
 
+  drawUpdateDot(g);
   if(useSprite) spr.pushSprite(0,0);
 }
 
@@ -2363,6 +2416,71 @@ bool fetchWeather(){
   Serial.printf("[WX] heute %.0f/%.0f C  %.1f h Sonne  %.0f%% Wolken  %.1f mm  %.0f W/m2\n",
                 gWx[0].tmax,gWx[0].tmin,gWx[0].sunH,gWx[0].cloud,gWx[0].rain,gWxRad);
   return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATE-PRUEFUNG
+// ─────────────────────────────────────────────────────────────────────────────
+// "1.18.0" vs "1.17.2": Vergleich stellenweise als Zahlen
+static int cmpVer(const String& a, const String& b){
+  int x[3]={0,0,0}, y[3]={0,0,0};
+  sscanf(a.c_str(),"%d.%d.%d",&x[0],&x[1],&x[2]);
+  sscanf(b.c_str(),"%d.%d.%d",&y[0],&y[1],&y[2]);
+  for(int i=0;i<3;i++){ if(x[i]!=y[i]) return x[i]<y[i]?-1:1; }
+  return 0;
+}
+
+// Holt "version" aus einer manifest.json. GitHub Pages gibt es nur ueber
+// HTTPS - deshalb wird diese Funktion nur gerufen, wenn genug Speicher am
+// Stueck frei ist (siehe checkUpdates).
+static String fetchManifestVersion(const char* url){
+  WiFiClientSecure c; c.setInsecure();
+  HTTPClient h;
+  h.begin(c,url); h.setTimeout(8000);
+  int code=h.GET();
+  String v="";
+  if(code==200){ String body=h.getString(); v=jsonStr(body,"version"); }
+  else Serial.printf("[UPD] HTTP %d fuer %s\n",code,url);
+  h.end();
+  return v;
+}
+
+// Vergleicht die laufende Firmware mit den beiden Installern.
+//   gelb: der Beta-Installer traegt eine neuere Version als dieses Geraet
+//   rot:  ein Stable-Release, das noch nicht quittiert wurde
+// Rot schlaegt Gelb. Ohne genug freien Speicher wird die Pruefung
+// uebersprungen - ein doppelter TLS-Handshake neben MQTT war der
+// Absturzgrund der fruehen Wetterseite.
+static void checkUpdates(){
+  if(ESP.getMaxAllocHeap()<50000){
+    Serial.printf("[UPD] Pruefung uebersprungen, groesster Block %u\n",
+                  (unsigned)ESP.getMaxAllocHeap());
+    return;
+  }
+  String beta = fetchManifestVersion("https://deffel6.github.io/anker-solix-display-beta/manifest.json");
+  String stab = fetchManifestVersion("https://deffel6.github.io/anker-solix-display/manifest.json");
+  if(beta.length()) gBetaLatest  =beta;
+  if(stab.length()) gStableLatest=stab;
+  // Erstes gesehenes Stable-Release nur merken, nicht melden - sonst
+  // leuchtet der Punkt nach jeder Neuinstallation grundlos rot.
+  if(gStableLatest.length() && gStableSeen.isEmpty()){
+    gStableSeen=gStableLatest;
+    prefs.begin("anker",false);
+    prefs.putString("seenstab",gStableSeen);
+    prefs.end();
+  }
+  int st=0;
+  if(gBetaLatest.length() && cmpVer(FW_VERSION,gBetaLatest)<0) st=1;
+  if(gStableLatest.length() && gStableSeen.length()
+     && cmpVer(gStableSeen,gStableLatest)<0) st=2;
+  if(st!=gUpdState){
+    gUpdState=st;
+    drawDisplay();          // Punkt sofort umfaerben
+  }
+  Serial.printf("[UPD] laufend %s | Beta %s | Stable %s (quittiert %s) -> %s\n",
+                FW_VERSION, gBetaLatest.c_str(), gStableLatest.c_str(),
+                gStableSeen.c_str(),
+                st==2?"ROT":st==1?"GELB":"GRUEN");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2493,6 +2611,12 @@ void loop(){
       gWxLast=now;
       fetchWeather();
     }
+  }
+  // Update-Pruefung: erstmals zwei Minuten nach dem Start (dann haben sich
+  // MQTT und Wetter eingeschwungen), danach alle 6 Stunden.
+  if((gUpdLast==0 && now>=120000) || (gUpdLast && now-gUpdLast>=21600000UL)){
+    gUpdLast=now;
+    checkUpdates();
   }
   // Nachtabschaltung: einmal pro Minute pruefen reicht. Bei Aenderungen
   // ueber die Weboberflaeche greift applyBrightness() dort sofort.
