@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anker Solix Display – Versionen</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --card:#161616; --line:#2a2a2a;
+    --fg:#eee; --dim:#999; --accent:#f0a500;
+    --beta:#4faaff; --ok:#4caf50;
+  }
+  @media (prefers-color-scheme:light){
+    :root{ --bg:#f6f6f6; --card:#fff; --line:#e2e2e2; --fg:#1a1a1a; --dim:#666; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--fg);
+    line-height:1.6; padding:24px; display:flex; justify-content:center;
+  }
+  .wrap{width:100%;max-width:640px}
+  h1{font-size:1.6rem;margin-bottom:4px}
+  .sub{color:var(--dim);margin-bottom:24px}
+  .lane{
+    font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--accent);margin:26px 0 12px;
+  }
+  .lane.beta{color:var(--beta)}
+  .card{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:18px 20px; margin-bottom:14px;
+  }
+  .vrow{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+  .vnum{font-size:1.15rem;font-weight:700}
+  .vdate{color:var(--dim);font-size:.85rem}
+  .badge{
+    font-size:.7rem;font-weight:700;letter-spacing:.05em;border-radius:6px;
+    padding:2px 8px;text-transform:uppercase;
+  }
+  .badge.aktuell{background:#4caf5022;color:var(--ok);border:1px solid #4caf5055}
+  .badge.beta{background:#4faaff22;color:var(--beta);border:1px solid #4faaff55}
+  .badge.test{background:#f0a50022;color:var(--accent);border:1px solid #f0a50055}
+  .card p{color:var(--dim);font-size:.92rem}
+  .card ul{padding-left:18px;color:var(--dim);font-size:.92rem}
+  .card li{margin-bottom:4px}
+  .links{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px}
+  .links a{
+    display:inline-block;padding:10px 16px;border-radius:10px;
+    text-decoration:none;font-weight:600;font-size:.9rem;
+    border:1px solid #f0a50055;color:var(--accent);
+  }
+  .links a.b{border-color:#4faaff55;color:var(--beta)}
+  a{color:var(--accent)}
+  footer{text-align:center;color:var(--dim);font-size:.85rem;margin-top:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>&#9889; Anker Solix Display</h1>
+  <p class="sub">Alle Versionen im &Uuml;berblick &ndash; stabile Linie und Beta.</p>
+
+  <div class="links">
+    <a href="https://deffel6.github.io/anker-solix-display/">Stabile Version installieren</a>
+    <a class="b" href="https://deffel6.github.io/anker-solix-display-beta/">Beta installieren</a>
+    <a href="https://github.com/deffel6/anker-solix-display/blob/main/CHANGELOG.md">Ausf&uuml;hrliche &Auml;nderungsliste</a>
+  </div>
+
+  <!-- ══════════ STABILE LINIE ══════════
+       Neue Version: einfach eine .card oben anfügen und das
+       „Aktuell"-Abzeichen von der alten auf die neue Karte verschieben. -->
+  <div class="lane">Stabile Linie</div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.10.0</span>
+      <span class="vdate">9. August 2026</span>
+      <span class="badge aktuell">Aktuell</span></div>
+    <p>Anzeige drehbar: 0/90/180/270 Grad, umschaltbar auf der Statusseite,
+       ohne Neustart.</p>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.9.0</span>
+      <span class="vdate">6. August 2026</span></div>
+    <ul>
+      <li>Akkupack-Seite <code>/akkus</code>: Zellspannungen, Temperaturen, Spreizung</li>
+      <li>Display zeigt den Systemladestand statt nur der Kopfstation</li>
+      <li>Akkukapazit&auml;t einstellbar</li>
+      <li>Automatische Anlagenwahl nur noch bei genau einer Anlage</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.7.1</span>
+      <span class="vdate">5. August 2026</span></div>
+    <p>Tagesertrag je Panel auf der Weboberfl&auml;che; Schalter f&uuml;r die
+       Protokollausgabe im Sketch.</p>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.6.0</span>
+      <span class="vdate">5. August 2026</span></div>
+    <p>Momentanleistung der vier einzelnen MPPT-Eing&auml;nge auf der
+       Weboberfl&auml;che.</p>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.5.0</span>
+      <span class="vdate">4. August 2026</span></div>
+    <p>Netzz&auml;hler-Teiler richtet sich nach dem Ger&auml;t (Shelly EM3 vs.
+       Anker Smartmeter), von Hand &uuml;berschreibbar.</p>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.4.0 &ndash; 1.4.2</span>
+      <span class="vdate">3.&ndash;4. August 2026</span></div>
+    <p>Weboberfl&auml;che im laufenden Betrieb; Anlagenwahl nach
+       Erreichbarkeit; ruhigerer Wartebildschirm.</p>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.2.8 &ndash; 1.3.0</span>
+      <span class="vdate">3. August 2026</span></div>
+    <p>Echtzeitdaten &uuml;ber Ankers MQTT-Broker im 3-Sekunden-Takt statt
+       5-Minuten-Cache der REST-API; einstufige Einrichtung; zuverl&auml;ssigere
+       Anmeldeseite.</p>
+  </div>
+
+  <!-- ══════════ BETA-LINIE ══════════ -->
+  <div class="lane beta">Beta-Linie <span style="text-transform:none;letter-spacing:0">&ndash; ohne Touch, f&uuml;r Ger&auml;te an der Wand</span></div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.14.0</span>
+      <span class="vdate">17. August 2026</span>
+      <span class="badge test">In Erprobung</span></div>
+    <ul>
+      <li>Wetterseite mit Piktogrammen (Sonne, Wolke, Regen) f&uuml;r heute und morgen</li>
+      <li>Aktuelle Globalstrahlung in W/qm</li>
+      <li>Seitenwechsel &uuml;ber die Weboberfl&auml;che</li>
+    </ul>
+    <p style="margin-top:6px">Erscheint im Beta-Installer nach dem Praxistest.</p>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.11.1</span>
+      <span class="vdate">17. August 2026</span>
+      <span class="badge beta">Aktuelle Beta</span></div>
+    <ul>
+      <li>Helligkeitsregler auf der Weboberfl&auml;che</li>
+      <li>Nachtabschaltung: Display in einem einstellbaren Zeitfenster dunkel</li>
+      <li>Basis 1.10.0, ohne Touch-Bedienung</li>
+    </ul>
+  </div>
+
+  <footer>
+    <a href="https://github.com/deffel6/anker-solix-display">Quelltext auf GitHub</a>
+    &middot; Lizenz: PolyForm Noncommercial 1.0.0
+  </footer>
+</div>
+</body>
+</html>
