@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.13.1"
+#define FW_VERSION "1.14.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -165,6 +165,7 @@ static int gPage = 0;
 // nirgends registrieren.
 struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
 static WxDay         gWx[2];
+static float         gWxRad   = 0;     // aktuelle Globalstrahlung in W/m2
 static bool          gWxValid = false;
 static unsigned long gWxLast  = 0;
 
@@ -2201,6 +2202,15 @@ static void drawWeather(){
     g->setTextColor(w.rain>0.5f?C_BLUE:C_GRAY,C_BLACK);
     g->drawString(b,cx+4,170);
   }
+
+  // Aktuelle Globalstrahlung, unten mittig. Aus demselben Abruf wie die
+  // Vorhersage, also hoechstens 30 Minuten alt.
+  snprintf(b,sizeof(b),"%.0f W/qm",gWxRad);
+  g->setFont(&fonts::FreeSans9pt7b);
+  g->setTextColor(gWxRad>=1.0f?C_YELLOW:C_GRAY,C_BLACK);
+  g->drawString(b,126,198);
+  icSun(g,126-(int)strlen(b)*5-12,206,4,gWxRad>=1.0f?C_YELLOW:C_GRAY);
+
   if(useSprite) spr.pushSprite(0,0);
 }
 
@@ -2219,7 +2229,8 @@ bool fetchWeather(){
   String url = "https://api.open-meteo.com/v1/forecast?latitude="+String(cfg.lat,4)
              + "&longitude="+String(cfg.lon,4)
              + "&daily=temperature_2m_max,temperature_2m_min,sunshine_duration,"
-               "cloud_cover_mean,precipitation_sum&forecast_days=2&timezone=auto";
+               "cloud_cover_mean,precipitation_sum"
+               "&current=shortwave_radiation&forecast_days=2&timezone=auto";
   h.begin(c,url);
   h.setTimeout(10000);
   int code=h.GET();
@@ -2239,9 +2250,10 @@ bool fetchWeather(){
     gWx[i].cloud= d["cloud_cover_mean"][i]   | 0.0f;
     gWx[i].rain = d["precipitation_sum"][i]  | 0.0f;
   }
+  gWxRad = doc["current"]["shortwave_radiation"] | 0.0f;
   gWxValid=true;
-  Serial.printf("[WX] heute %.0f/%.0f C  %.1f h Sonne  %.0f%% Wolken  %.1f mm\n",
-                gWx[0].tmax,gWx[0].tmin,gWx[0].sunH,gWx[0].cloud,gWx[0].rain);
+  Serial.printf("[WX] heute %.0f/%.0f C  %.1f h Sonne  %.0f%% Wolken  %.1f mm  %.0f W/m2\n",
+                gWx[0].tmax,gWx[0].tmin,gWx[0].sunH,gWx[0].cloud,gWx[0].rain,gWxRad);
   return true;
 }
 

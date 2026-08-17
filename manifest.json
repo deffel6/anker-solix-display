@@ -1,6 +1,6 @@
 {
   "name": "Anker Solix Display BETA",
-  "version": "1.13.1",
+  "version": "1.14.0",
   "new_install_prompt_erase": true,
   "builds": [
     {
