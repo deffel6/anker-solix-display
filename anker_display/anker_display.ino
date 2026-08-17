@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.19.0"
+#define FW_VERSION "1.21.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -1873,13 +1873,50 @@ static bool parseParamInfo(const String& b64){
     }
     i+=2+ln;
   }
-  free(b);
   if(!haveSolar){
-    // 425-Byte-Variante ohne 0xab – nur einmal melden, nicht bei jeder Nachricht
-    static bool once=false;
-    if(!once){ once=true; Serial.println("[BANK] Nebennachricht ohne 0xab – ignoriert"); }
+    // Kein 0xab: bei der Solarbank 2 (A17C1) liegen die Leistungen offenbar
+    // unter anderen Feldnummern. Zum Dekodieren einmal pro Minute und
+    // Groessenklasse eine Feldkarte MIT WERTEN ausgeben - daraus laesst
+    // sich die Belegung per Vergleich mit der App ablesen.
+    static unsigned long lastMap[2]={0,0};
+    int slot = got>500 ? 0 : 1;
+    if(millis()-lastMap[slot]>=60000){
+      lastMap[slot]=millis();
+      String map = "typ="+String(b[7],HEX)+String(b[8],HEX)
+                 + " len="+String((unsigned)got)+"\n";
+      size_t j=9;
+      while(j+1<got){
+        uint8_t tag=b[j], ln=b[j+1];
+        if(j+2+(size_t)ln>got) break;
+        const uint8_t* e=b+j+2;
+        char t[48];
+        uint8_t ty = ln?e[0]:0;
+        if(ln==5 && ty==0x05){ float v; memcpy(&v,e+1,4);
+          snprintf(t,sizeof(t),"%02x:f=%.1f ",tag,v); }
+        else if(ln==5 && ty==0x03){ uint32_t v; memcpy(&v,e+1,4);
+          snprintf(t,sizeof(t),"%02x:u32=%lu ",tag,(unsigned long)v); }
+        else if(ln==3 && ty==0x02){ int16_t v; memcpy(&v,e+1,2);
+          snprintf(t,sizeof(t),"%02x:i16=%d ",tag,(int)v); }
+        else if(ln==2 && ty==0x01){
+          snprintf(t,sizeof(t),"%02x:u8=%u ",tag,e[1]); }
+        else if(ty==0x00 && ln>1){
+          snprintf(t,sizeof(t),"%02x:s ",tag); }
+        else {
+          int p2=snprintf(t,sizeof(t),"%02x:%u/t%02x=",tag,ln,ty);
+          for(uint8_t k=1;k<ln && k<=6 && p2<(int)sizeof(t)-3;k++)
+            p2+=snprintf(t+p2,sizeof(t)-p2,"%02x",e[k]);
+          snprintf(t+p2,sizeof(t)-p2," ");
+        }
+        map+=t;
+        j+=2+ln;
+      }
+      Serial.println("[KARTE] param_info ohne 0xab:");
+      printLong("KARTE",map);
+    }
+    free(b);
     return false;
   }
+  free(b);
 
   // Ladestand des Gesamtsystems statt nur der Kopfstation. 0xa3 meldet nur
   // die Haupteinheit; die App zeigt den Systemwert. Solange die Packdaten
