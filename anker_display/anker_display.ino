@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.16.0"
+#define FW_VERSION "1.17.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -69,6 +69,7 @@
 #include <mbedtls/aes.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/md.h>
+#include <esp_task_wdt.h>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
@@ -2340,6 +2341,20 @@ void setup(){
   startWebUi();
   lcd.fillScreen(C_BLACK);
   drawDisplay();
+
+  // Watchdog gegen das Einfrieren: bleibt loop() laenger als 60 s stehen,
+  // startet das Geraet von selbst neu. 60 s deshalb, weil eine zaehe
+  // MQTT-Neuverbindung plus Wetterabruf zusammen schon eine halbe Minute
+  // dauern koennen - ein echter Haenger ist dagegen endlos.
+  // Erst hier am Ende von setup(): die Portale (startConfigPortal,
+  // startFixPortal) kehren nie zurueck und duerfen nicht ueberwacht werden.
+  {
+    esp_task_wdt_config_t wc = {
+      .timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true };
+    if(esp_task_wdt_reconfigure(&wc)!=ESP_OK) esp_task_wdt_init(&wc);
+    esp_task_wdt_add(NULL);
+    Serial.println("[SYS] Watchdog 60 s aktiv");
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2348,6 +2363,22 @@ void setup(){
 static unsigned long lastFetch=0, lastClock=0;
 void loop(){
   unsigned long now=millis();
+  esp_task_wdt_reset();    // Lebenszeichen an den Watchdog
+  // Speicherwache: einmal alle 10 Minuten Stand ins Log. Ist der groesste
+  // zusammenhaengende Block unter 16 KB gefallen, ist der Speicher so
+  // zerstueckelt, dass die naechste TLS-Verbindung ohnehin scheitert -
+  // dann lieber ein kontrollierter Neustart als spaeter ein Haenger.
+  static unsigned long lastHeapLog=0;
+  if(now-lastHeapLog>=600000){
+    lastHeapLog=now;
+    Serial.printf("[SYS] Heap %u, groesster Block %u\n",
+                  (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMaxAllocHeap());
+    if(ESP.getMaxAllocHeap()<16384){
+      Serial.println("[SYS] Speicher zerstueckelt - Neustart");
+      delay(200);
+      ESP.restart();
+    }
+  }
   server.handleClient();   // Weboberflaeche bedienen
   // MQTT am Leben halten – ohne loop() kommen keine Nachrichten an
   if(gMqtt.connected()){
