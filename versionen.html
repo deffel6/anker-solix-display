@@ -140,9 +140,29 @@
   <div class="lane beta">Beta-Linie <span style="text-transform:none;letter-spacing:0">&ndash; ohne Touch, f&uuml;r Ger&auml;te an der Wand</span></div>
 
   <div class="card">
-    <div class="vrow"><span class="vnum">1.22.0</span>
-      <span class="vdate">17. August 2026</span>
+    <div class="vrow"><span class="vnum">1.23.0 &ndash; 1.29.0</span>
+      <span class="vdate">18. August 2026</span>
       <span class="badge beta">Aktuelle Beta</span></div>
+    <p style="margin-bottom:8px"><strong style="color:var(--fg)">Die
+    Update-Anzeige funktioniert jetzt wirklich.</strong> Der Punkt blieb
+    bisher immer gr&uuml;n: die Pr&uuml;fung wurde wegen einer zu strengen
+    Speichergrenze verworfen und las die Versionsnummer wegen eines
+    Leerzeichens im Dateiformat gar nicht erst aus.</p>
+    <ul>
+      <li>Knopf &bdquo;jetzt pr&uuml;fen&ldquo; auf der Weboberfl&auml;che,
+          dazu die laufende und die im Installer liegende Version im Klartext</li>
+      <li>F&uuml;r die Pr&uuml;fung wird die MQTT-Verbindung kurz getrennt &ndash;
+          zwei verschl&uuml;sselte Verbindungen gleichzeitig lie&szlig;en das
+          Ger&auml;t einfrieren</li>
+      <li>Watchdog-Zustand im Boot-Log und auf der Weboberfl&auml;che sichtbar</li>
+      <li>Diagnose-Ausgaben nur noch bei Ger&auml;ten, die keine Leistungsdaten
+          liefern</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="vrow"><span class="vnum">1.22.0</span>
+      <span class="vdate">17. August 2026</span></div>
     <p style="margin-bottom:8px"><strong style="color:var(--fg)">Erste
     Unterst&uuml;tzung f&uuml;r die Solarbank 2 Pro (A17C1).</strong>
     Solarleistung, die vier Panel-Strings und der Ladestand kommen im
