@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.25.0"
+#define FW_VERSION "1.26.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -175,6 +175,7 @@ static int gPage = 0;
 static int    gUpdState    = 0;    // 0=gruen 1=gelb 2=rot
 static String gBetaLatest, gStableLatest, gStableSeen;
 static unsigned long gUpdLast = 0;
+static bool          gUpdWanted = false;   // Pruefung angefordert
 
 struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
 static WxDay         gWx[2];
@@ -1006,9 +1007,12 @@ static void applyBrightness(){
 // Update-Pruefung von Hand ausloesen. Praktisch zum Testen und wenn man
 // nach einem Release nicht bis zum naechsten Sechs-Stunden-Takt warten will.
 void handleUpdCheck(){
-  Serial.println("[UPD] Pruefung von Hand ausgeloest");
-  checkUpdates();
-  gUpdLast=millis();
+  // Nur vormerken, nicht hier pruefen: die Pruefung dauert Sekunden und
+  // braucht Speicher, den erst die MQTT-Verbindung freigeben muss. Beides
+  // gehoert nicht in einen Webserver-Handler - genau daran ist das Geraet
+  // eingefroren. loop() erledigt es gleich darauf.
+  gUpdWanted=true;
+  Serial.println("[UPD] Pruefung von Hand angefordert");
   server.sendHeader("Location","/"); server.send(302);
 }
 
@@ -2567,6 +2571,25 @@ static String fetchManifestVersion(const char* url){
   return v;
 }
 
+// Pruefung im laufenden Betrieb. Die MQTT-Verbindung wird dafuer getrennt:
+// ihr TLS-Zustand belegt rund 45 kB am Stueck, und genau die fehlen der
+// zweiten verschluesselten Verbindung. loop() baut MQTT gleich danach wieder
+// auf, das kostet ein paar Sekunden ohne Live-Werte - deutlich besser als
+// ein haengendes Geraet.
+static void checkUpdates();
+static void runUpdateCheck(){
+  bool wasUp = gMqtt.connected();
+  if(wasUp){
+    Serial.println("[UPD] MQTT kurz getrennt, um Speicher freizugeben");
+    gMqtt.disconnect();
+    gMqttNet.stop();
+    delay(50);
+  }
+  checkUpdates();
+  gUpdLast=millis();
+  if(wasUp) gMqttLastTry=0;      // sofortiger Neuaufbau in loop()
+}
+
 // Vergleicht die laufende Firmware mit den beiden Installern.
 //   gelb: der Beta-Installer traegt eine neuere Version als dieses Geraet
 //   rot:  ein Stable-Release, das noch nicht quittiert wurde
@@ -2749,9 +2772,9 @@ void loop(){
   }
   // Update-Pruefung: erstmals zwei Minuten nach dem Start (dann haben sich
   // MQTT und Wetter eingeschwungen), danach alle 6 Stunden.
-  if((gUpdLast==0 && now>=120000) || (gUpdLast && now-gUpdLast>=21600000UL)){
-    gUpdLast=now;
-    checkUpdates();
+  if(gUpdWanted || (gUpdLast && now-gUpdLast>=21600000UL)){
+    gUpdWanted=false;
+    runUpdateCheck();
   }
   // Sicherheitsnetz gegen Flackern: fehlt das Sprite - etwa weil einmal zu
   // wenig Speicher am Stueck frei war -, alle 10 s neu versuchen.
