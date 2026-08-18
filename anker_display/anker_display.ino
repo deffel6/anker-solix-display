@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.27.0"
+#define FW_VERSION "1.28.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -177,6 +177,7 @@ static String gBetaLatest, gStableLatest, gStableSeen;
 static unsigned long gUpdLast = 0;
 static bool          gUpdWanted = false;   // Pruefung angefordert
 static bool          gWdtOk     = false;   // Watchdog scharf?
+static bool          gHavePower = false;   // schon einmal Leistungen dekodiert?
 
 struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
 static WxDay         gWx[2];
@@ -1998,7 +1999,11 @@ static bool parseParamInfo(const String& b64){
   if(!haveSolar){
     // Weder 3-Pro- noch 2-Pro-Felder gefunden: Feldkarte ausgeben, um die
     // Belegung per Vergleich mit der App zu entschluesseln.
-    printFieldMap(b, got, got>300?0:1, "Bank ohne Leistungsfelder,");
+    // Nur ausgeben, solange von diesem Geraet noch nie Leistungswerte kamen.
+    // Sonst meldet sich bei einer laufenden Solarbank 3 Pro jede Minute die
+    // Begleitnachricht, die gar keine Leistungen traegt.
+    if(!gHavePower)
+      printFieldMap(b, got, got>300?0:1, "Bank ohne Leistungsfelder,");
     free(b);
     return false;
   }
@@ -2027,6 +2032,7 @@ static bool parseParamInfo(const String& b64){
     gData.battery_wh = soc/100.0f*cfg.battWh;
   }
   gData.valid=true;
+  gHavePower=true;
   for(int k=0;k<4;k++) gPvStr[k]=str[k];
   integrateEnergy();
   LOGF("[PV] %.0f W = %.0f+%.0f+%.0f+%.0f | Akku %.0f W | Aus %.0f W\n",
@@ -2584,7 +2590,7 @@ static void runUpdateCheck(){
     Serial.println("[UPD] MQTT kurz getrennt, um Speicher freizugeben");
     gMqtt.disconnect();
     gMqttNet.stop();
-    delay(50);
+    delay(250);      // dem Speicher Zeit geben, wieder zusammenzuwachsen
   }
   checkUpdates();
   gUpdLast=millis();
@@ -2604,10 +2610,14 @@ static void checkUpdates(){
   // die erste Pruefung beim Start, bevor die MQTT-Verbindung steht; dort ist
   // reichlich Speicher frei. Im Betrieb wird nur gemessen und notfalls
   // uebersprungen.
-  bool tooTight = ESP.getMaxAllocHeap()<40000;
-  if(tooTight)
-    Serial.printf("[UPD] Pruefung uebersprungen, groesster Block %u\n",
-                  (unsigned)ESP.getMaxAllocHeap());
+  // Schwelle bewusst niedrig: der TLS-Handshake belegt nicht einen einzigen
+  // grossen Block, sondern mehrere mittlere. Gemessen hat sich MQTT direkt
+  // nach dem Trennen mit 38,9 kB groesstem Block problemlos neu verbunden -
+  // die fruehere Grenze von 40 kB hat die Pruefung deshalb immer verworfen.
+  bool tooTight = ESP.getMaxAllocHeap()<25000;
+  Serial.printf("[UPD] Speicher: frei %u, groesster Block %u%s\n",
+                (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMaxAllocHeap(),
+                tooTight?" - zu wenig, uebersprungen":"");
   String beta, stab;
   if(!tooTight){
   beta = fetchManifestVersion("https://deffel6.github.io/anker-solix-display-beta/manifest.json");
