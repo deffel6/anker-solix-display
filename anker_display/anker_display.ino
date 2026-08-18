@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.22.0"
+#define FW_VERSION "1.23.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -696,6 +696,7 @@ static void applyGridScale();
 void handleSave();
 bool fetchWeather();
 static int cmpVer(const String& a, const String& b);
+static void checkUpdates();
 
 // Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
 // leer, weil sie sonst nur beim Einrichten gefuellt wird.
@@ -774,6 +775,10 @@ void handleStatus(){
              "<a style='color:#f0a500' href='https://deffel6.github.io/anker-solix-display-beta/'>installieren</a>";
   else
     updRow = "<span style='color:#4caf50'>&#9679;</span> Firmware aktuell";
+  updRow += " &middot; <a style='color:#888' href='/updcheck'>jetzt pr&uuml;fen</a>";
+  if(gBetaLatest.length())
+    updRow += "<br><span style='color:#555'>l&auml;uft: " FW_VERSION
+              ", Beta im Installer: " + gBetaLatest + "</span>";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -998,6 +1003,15 @@ static void applyBrightness(){
   lcd.setBrightness(gNight?0:cfg.bright);
 }
 
+// Update-Pruefung von Hand ausloesen. Praktisch zum Testen und wenn man
+// nach einem Release nicht bis zum naechsten Sechs-Stunden-Takt warten will.
+void handleUpdCheck(){
+  Serial.println("[UPD] Pruefung von Hand ausgeloest");
+  checkUpdates();
+  gUpdLast=millis();
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 // Stable-Hinweis quittieren: der rote Punkt erlischt, bis das naechste
 // Stable-Release erscheint.
 void handleUpdOk(){
@@ -1150,6 +1164,7 @@ void startWebUi(){
   server.on("/geo",        HTTP_GET,  handleGeo);
   server.on("/device",     HTTP_GET,  handleDevice);
   server.on("/updok",      HTTP_GET,  handleUpdOk);
+  server.on("/updcheck",   HTTP_GET,  handleUpdCheck);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -2545,13 +2560,32 @@ static String fetchManifestVersion(const char* url){
 // uebersprungen - ein doppelter TLS-Handshake neben MQTT war der
 // Absturzgrund der fruehen Wetterseite.
 static void checkUpdates(){
-  if(ESP.getMaxAllocHeap()<50000){
+  // Im laufenden Betrieb ist der Speicher durch die stehende MQTT-Verbindung
+  // so zerstueckelt, dass fuer den TLS-Handshake kein Block mehr uebrig ist -
+  // gemessen 47 kB, gebraucht rund 45. Das Sprite belegt allein 57 kB und
+  // wird deshalb fuer die Dauer der Pruefung freigegeben; drawDisplay()
+  // zeichnet solange direkt aufs Panel, dafuer ist es vorbereitet.
+  bool hadSprite = spr.getBuffer()!=nullptr;
+  if(hadSprite && ESP.getMaxAllocHeap()<70000){
+    spr.deleteSprite();
+    Serial.printf("[UPD] Sprite frei, Block jetzt %u\n",
+                  (unsigned)ESP.getMaxAllocHeap());
+  }
+  bool tooTight = ESP.getMaxAllocHeap()<45000;
+  if(tooTight)
     Serial.printf("[UPD] Pruefung uebersprungen, groesster Block %u\n",
                   (unsigned)ESP.getMaxAllocHeap());
-    return;
+  String beta, stab;
+  if(!tooTight){
+  beta = fetchManifestVersion("https://deffel6.github.io/anker-solix-display-beta/manifest.json");
+  stab = fetchManifestVersion("https://deffel6.github.io/anker-solix-display/manifest.json");
   }
-  String beta = fetchManifestVersion("https://deffel6.github.io/anker-solix-display-beta/manifest.json");
-  String stab = fetchManifestVersion("https://deffel6.github.io/anker-solix-display/manifest.json");
+  // Sprite sofort wieder anlegen, damit die Anzeige nicht flackernd bleibt
+  if(hadSprite && spr.getBuffer()==nullptr){
+    spr.setColorDepth(8);
+    if(!spr.createSprite(240,240)) Serial.println("[UPD] Sprite konnte nicht zurueck");
+  }
+  if(tooTight) return;
   if(beta.length()) gBetaLatest  =beta;
   if(stab.length()) gStableLatest=stab;
   // Erstes gesehenes Stable-Release nur merken, nicht melden - sonst
