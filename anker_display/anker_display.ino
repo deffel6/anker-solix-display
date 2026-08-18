@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.24.0"
+#define FW_VERSION "1.25.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -1611,10 +1611,24 @@ static int rawPost(const String& path, const String& body, String& outResp) {
 // Holt einen JSON-Stringwert per Textsuche – spart den Speicher, den ein
 // DynamicJsonDocument fuer die 8 KB grosse MQTT-Antwort braeuchte.
 static String jsonStr(const String& json, const char* key) {
-  String pat=String("\"")+key+"\":\"";
+  String pat=String("\"")+key+"\"";
   int i=json.indexOf(pat);
   if(i<0) return "";
   i+=pat.length();
+  // Doppelpunkt und Leerraum ueberspringen: die Anker-API liefert kompaktes
+  // JSON ("version":"1.2.3"), eine von Hand gepflegte Datei dagegen
+  // eingerueckt ("version": "1.2.3"). Genau daran ist die Update-Pruefung
+  // gescheitert - sie las stumm einen leeren Wert.
+  auto skipWs=[&](int k){
+    while(k<(int)json.length() &&
+          (json[k]==' '||json[k]=='\t'||json[k]=='\n'||json[k]=='\r')) k++;
+    return k;
+  };
+  i=skipWs(i);
+  if(i>=(int)json.length()||json[i]!=':') return "";
+  i=skipWs(i+1);
+  if(i>=(int)json.length()||json[i]!='"') return "";
+  i++;
   int e=i;
   while(e<(int)json.length()){
     if(json[e]=='"'&&json[e-1]!='\\') break;
