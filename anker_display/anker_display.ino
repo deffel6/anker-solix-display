@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.23.0"
+#define FW_VERSION "1.24.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -2560,18 +2560,13 @@ static String fetchManifestVersion(const char* url){
 // uebersprungen - ein doppelter TLS-Handshake neben MQTT war der
 // Absturzgrund der fruehen Wetterseite.
 static void checkUpdates(){
-  // Im laufenden Betrieb ist der Speicher durch die stehende MQTT-Verbindung
-  // so zerstueckelt, dass fuer den TLS-Handshake kein Block mehr uebrig ist -
-  // gemessen 47 kB, gebraucht rund 45. Das Sprite belegt allein 57 kB und
-  // wird deshalb fuer die Dauer der Pruefung freigegeben; drawDisplay()
-  // zeichnet solange direkt aufs Panel, dafuer ist es vorbereitet.
-  bool hadSprite = spr.getBuffer()!=nullptr;
-  if(hadSprite && ESP.getMaxAllocHeap()<70000){
-    spr.deleteSprite();
-    Serial.printf("[UPD] Sprite frei, Block jetzt %u\n",
-                  (unsigned)ESP.getMaxAllocHeap());
-  }
-  bool tooTight = ESP.getMaxAllocHeap()<45000;
+  // Das Sprite wird NICHT mehr freigegeben, um Platz zu schaffen: nach der
+  // Pruefung liess es sich nicht zuverlaessig zurueckholen, und ohne Sprite
+  // zeichnet das Display direkt aufs Panel - es flackert. Stattdessen laeuft
+  // die erste Pruefung beim Start, bevor die MQTT-Verbindung steht; dort ist
+  // reichlich Speicher frei. Im Betrieb wird nur gemessen und notfalls
+  // uebersprungen.
+  bool tooTight = ESP.getMaxAllocHeap()<40000;
   if(tooTight)
     Serial.printf("[UPD] Pruefung uebersprungen, groesster Block %u\n",
                   (unsigned)ESP.getMaxAllocHeap());
@@ -2579,11 +2574,6 @@ static void checkUpdates(){
   if(!tooTight){
   beta = fetchManifestVersion("https://deffel6.github.io/anker-solix-display-beta/manifest.json");
   stab = fetchManifestVersion("https://deffel6.github.io/anker-solix-display/manifest.json");
-  }
-  // Sprite sofort wieder anlegen, damit die Anzeige nicht flackernd bleibt
-  if(hadSprite && spr.getBuffer()==nullptr){
-    spr.setColorDepth(8);
-    if(!spr.createSprite(240,240)) Serial.println("[UPD] Sprite konnte nicht zurueck");
   }
   if(tooTight) return;
   if(beta.length()) gBetaLatest  =beta;
@@ -2662,6 +2652,10 @@ void setup(){
   if(!ankerLogin()){startFixPortal();return;}
 
   gSiteId=cfg.siteId;
+  // Update-Pruefung noch vor der MQTT-Verbindung: jetzt ist der Speicher
+  // unzerstueckelt, der TLS-Handshake gelingt zuverlaessig.
+  checkUpdates();
+  gUpdLast=millis();
   if(fetchMqttCreds() && fetchDeviceInfo()) mqttConnect();
   // fetchData() entfaellt: get_scen_info liefert nur 463, die Werte
   // kommen jetzt vollstaendig ueber MQTT.
@@ -2744,6 +2738,14 @@ void loop(){
   if((gUpdLast==0 && now>=120000) || (gUpdLast && now-gUpdLast>=21600000UL)){
     gUpdLast=now;
     checkUpdates();
+  }
+  // Sicherheitsnetz gegen Flackern: fehlt das Sprite - etwa weil einmal zu
+  // wenig Speicher am Stueck frei war -, alle 10 s neu versuchen.
+  static unsigned long lastSpr=0;
+  if(spr.getBuffer()==nullptr && now-lastSpr>=10000){
+    lastSpr=now;
+    spr.setColorDepth(8);
+    if(spr.createSprite(240,240)) Serial.println("[SPR] wieder angelegt");
   }
   // Nachtabschaltung: einmal pro Minute pruefen reicht. Bei Aenderungen
   // ueber die Weboberflaeche greift applyBrightness() dort sofort.
