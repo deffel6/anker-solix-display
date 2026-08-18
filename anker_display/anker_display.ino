@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.26.0"
+#define FW_VERSION "1.27.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -176,6 +176,7 @@ static int    gUpdState    = 0;    // 0=gruen 1=gelb 2=rot
 static String gBetaLatest, gStableLatest, gStableSeen;
 static unsigned long gUpdLast = 0;
 static bool          gUpdWanted = false;   // Pruefung angefordert
+static bool          gWdtOk     = false;   // Watchdog scharf?
 
 struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
 static WxDay         gWx[2];
@@ -777,9 +778,9 @@ void handleStatus(){
   else
     updRow = "<span style='color:#4caf50'>&#9679;</span> Firmware aktuell";
   updRow += " &middot; <a style='color:#888' href='/updcheck'>jetzt pr&uuml;fen</a>";
-  if(gBetaLatest.length())
-    updRow += "<br><span style='color:#555'>l&auml;uft: " FW_VERSION
-              ", Beta im Installer: " + gBetaLatest + "</span>";
+  updRow += "<br><span style='color:#555'>l&auml;uft: " FW_VERSION;
+  if(gBetaLatest.length()) updRow += ", Beta im Installer: " + gBetaLatest;
+  updRow += String(" &middot; Watchdog ") + (gWdtOk ? "scharf" : "aus") + "</span>";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -2709,9 +2710,14 @@ void setup(){
   {
     esp_task_wdt_config_t wc = {
       .timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true };
-    if(esp_task_wdt_reconfigure(&wc)!=ESP_OK) esp_task_wdt_init(&wc);
-    esp_task_wdt_add(NULL);
-    Serial.println("[SYS] Watchdog 60 s aktiv");
+    esp_err_t cfg = esp_task_wdt_reconfigure(&wc);
+    if(cfg!=ESP_OK) cfg = esp_task_wdt_init(&wc);
+    // Rueckmeldung auswerten statt blind Vollzug zu melden: nur wenn die
+    // Anmeldung geklappt hat, startet ein haengendes Geraet auch wirklich
+    // von selbst neu.
+    gWdtOk = (esp_task_wdt_add(NULL)==ESP_OK);
+    Serial.printf("[SYS] Watchdog %s (cfg=%d)\n",
+                  gWdtOk ? "scharf, 60 s" : "NICHT aktiv", (int)cfg);
   }
 }
 
