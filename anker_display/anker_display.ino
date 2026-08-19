@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.16.0"
+#define FW_VERSION "1.20.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -764,6 +764,9 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/rotate?v=2'>180&deg;</a> &middot; "
     "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
     "(aktuell %d&deg;)</p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Touch reagiert nicht mehr? "
+    "<a style='color:#f0a500' href='/touchreset'>Bus zur&uuml;cksetzen</a></p>"
     "<a class='btn' href='/akkus'>Akkupacks im Detail</a>"
     "<a class='sec' href='/sites'>Anlage wechseln</a>"
     "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
@@ -870,6 +873,27 @@ void handleRotate(){
   server.sendHeader("Location","/"); server.send(302);
 }
 
+// Wiederherstellung des Touch-Busses, nur auf Knopfdruck. Der Ablauf in der
+// Hauptschleife bleibt unangetastet - drei Versuche, dort etwas einzubauen,
+// haben den Touch jedes Mal lahmgelegt.
+//
+// Reihenfolge ist entscheidend: erst freigeben, dann neu aufsetzen. Ein
+// blosser Aufruf von init() ruft intern lgfx::i2c::init() erneut auf, ohne
+// den Bus vorher freizugeben - genau daran ist der letzte Versuch gescheitert.
+static void touchBusReset(){
+  Serial.println("[TOUCH] Bus freigeben und Treiber neu aufsetzen");
+  lgfx::i2c::release(0);
+  delay(20);
+  if(lcd.touch()) lcd.touch()->init();
+  delay(20);
+  Serial.println("[TOUCH] fertig");
+}
+
+void handleTouchReset(){
+  touchBusReset();
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 void handleBattWh(){
   int v=server.arg("v").toInt();
   if(v>=100 && v<=60000){
@@ -899,6 +923,7 @@ void startWebUi(){
   server.on("/gridscale",  HTTP_GET,  handleGridScale);
   server.on("/akkus",      HTTP_GET,  handlePacks);
   server.on("/battwh",     HTTP_GET,  handleBattWh);
+  server.on("/touchreset", HTTP_GET,  handleTouchReset);
   server.on("/rotate",     HTTP_GET,  handleRotate);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
@@ -1410,65 +1435,7 @@ bool fetchDeviceInfo(){
   if(code!=200){Serial.printf("[DEV] HTTP %d\n",code);return false;}
   // Innerhalb solarbank_list suchen, damit nicht der Shelly erwischt wird
   int sb=resp.indexOf("\"solarbank_list\":");
-  if(sb<0){
-    // Ohne Solarbank kein MQTT-Topic. Statt nur abzubrechen zeigen wir, was
-    // die Anlage stattdessen enthaelt - das Projekt kennt bisher nur die
-    // Solarbank, und ohne die Antwort laesst sich nicht sagen, was fehlt.
-    Serial.println("[DEV] keine solarbank_list. Gefundene Geraetelisten:");
-    int i=0, n=0;
-    while(true){
-      int k=resp.indexOf("_list\":",i);
-      if(k<0) break;
-      int st=resp.lastIndexOf('"',k);        // Anfang des Schluesselnamens
-      if(st>=0){
-        String key=resp.substring(st+1,k+5);
-        // Ist die Liste leer oder gefuellt?
-        int br=resp.indexOf('[',k);
-        bool leer = (br>=0 && resp.indexOf(']',br)==br+1);
-        Serial.printf("   %-24s %s\n",key.c_str(),leer?"leer":"GEFUELLT");
-        n++;
-      }
-      i=k+5;
-    }
-    if(!n) Serial.println("   keine einzige gefunden");
-    printLong("DEV",resp);
-
-    // Rueckfallweg: get_relate_and_bind_devices listet die Geraete des
-    // KONTOS statt der Anlage. Bei geteilten Konten oder frisch angelegten
-    // Anlagen fehlt die Solarbank in get_site_detail, steht dort aber drin.
-    Serial.println("[DEV] Zweitversuch ueber die Geraeteliste des Kontos");
-    String r2;
-    if(rawPost("power_service/v1/app/get_relate_and_bind_devices","{}",r2)!=200){
-      Serial.println("[DEV] auch das misslang");
-      return false;
-    }
-    printLong("DEV2",r2);   // Antwort zeigen, nicht nur auswerten
-    // Erste Solarbank suchen. Alle Modelle der Reihe beginnen mit A17C.
-    int pos=0;
-    while(true){
-      int k=r2.indexOf("\"product_code\":\"A17C",pos);
-      if(k<0) break;
-      String tail2=r2.substring(k);
-      gDevPn=jsonStr(tail2,"product_code");
-      // device_sn steht im selben Objekt, aber VOR product_code
-      int objStart=r2.lastIndexOf('{',k);
-      if(objStart>=0) gDevSn=jsonStr(r2.substring(objStart),"device_sn");
-      if(gDevSn.length()){
-        Serial.printf("[DEV] gefunden: %s  %s  (%s)\n",
-                      gDevPn.c_str(),gDevSn.c_str(),
-                      jsonStr(tail2,"device_name").c_str());
-        applyGridScale();
-        return true;
-      }
-      pos=k+20;
-    }
-    Serial.println("[DEV] keine Solarbank im Konto gefunden");
-
-    // Ein dritter Versuch ueber app/devicerelation/get_shared_device
-    // entfaellt: der Endpunkt verlangt die Seriennummer als Parameter, also
-    // genau das, was hier gesucht wird. Geprueft, liefert HTTP 400.
-    return false;
-  }
+  if(sb<0){Serial.println("[DEV] keine solarbank_list");return false;}
   String tail=resp.substring(sb);
   gDevPn=jsonStr(tail,"device_pn");
   gDevSn=jsonStr(tail,"device_sn");
@@ -2163,11 +2130,7 @@ static void handleTouch(){
   // Spanne waehrend der Beruehrung, nicht die Differenz zwischen erstem und
   // letztem Wert: der CST816S antwortet zeitweise gar nicht, und dann waere
   // die Differenz null, obwohl gewischt wurde.
-  // Obergrenze 2500 ms statt 1500: eine gemessene Wischbewegung dauerte
-  // 1018 ms, das lag zu dicht an der Grenze. Bedaechtiges Wischen fiel sonst
-  // wortlos durch. Ein versehentlich aufgelegter Handballen dauert laenger
-  // und wird weiterhin abgewiesen.
-  if(span>30 && dur<2500){
+  if(span>30 && dur<1500){
     gPage = (gPage+1) % PAGES;
     lcd.fillScreen(C_BLACK);
     drawDisplay();
@@ -2209,6 +2172,16 @@ void loop(){
     drawDisplay(); lastFetch=now;
   }
   // Uhr auch ohne gueltige Daten weiterlaufen lassen
+  // Bus alle vier Minuten vorsorglich zuruecksetzen. Bewusst ohne vorherige
+  // Pruefung: Eine Abfrage, ob der Bus noch antwortet, greift auf denselben
+  // Bus zu wie der Treiber - und genau solche Kollisionen duerften das
+  // Festfahren ueberhaupt erst ausloesen. Die Wiederherstellung blind
+  // auszufuehren kostet 40 ms und keine zusaetzliche Abfrage.
+  static unsigned long lastTouchReset=0;
+  if(now-lastTouchReset>=120000){
+    lastTouchReset=now;
+    touchBusReset();
+  }
   if(now-lastClock>=30000){
     drawDisplay();
     lastClock=now;
