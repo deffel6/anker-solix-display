@@ -39,7 +39,7 @@
   SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
   Copyright (c) 2026 Detlev Euskirchen
 */
-#define FW_VERSION "1.16.0"
+#define FW_VERSION "1.29.0"
 
 // Ausfuehrliche Ausgaben im seriellen Monitor.
 //   1 = jede MQTT-Nachricht wird protokolliert (zum Mitlesen und Decodieren)
@@ -69,6 +69,7 @@
 #include <mbedtls/aes.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/md.h>
+#include <esp_task_wdt.h>
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
@@ -86,22 +87,10 @@ static const char* SERVER_PUBKEY_HEX =
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPLAY
 // ─────────────────────────────────────────────────────────────────────────────
-// ── Touch ───────────────────────────────────────────────────────────────────
-// Runde GC9A01-Module mit Touch verwenden praktisch immer einen CST816S ueber
-// I2C. Die Anschluesse unten gelten fuer das verbreitete Waveshare-Modul
-// ESP32-C3-LCD-1.28; weicht dein Board ab, sind es genau diese vier Zeilen.
-// Ohne Touch-Hardware schadet das nichts: getTouch() liefert dann einfach nie
-// eine Beruehrung, und die zweite Seite bleibt unerreichbar.
-#define TOUCH_SDA   4
-#define TOUCH_SCL   5
-#define TOUCH_INT   0
-#define TOUCH_RST  -1   // teilt sich beim C3-Modul den Reset mit dem Display
-
 class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_GC9A01   _panel;
-  lgfx::Bus_SPI        _bus;
-  lgfx::Light_PWM      _light;
-  lgfx::Touch_CST816S  _touch;
+  lgfx::Panel_GC9A01 _panel;
+  lgfx::Bus_SPI      _bus;
+  lgfx::Light_PWM    _light;
 public:
   LGFX() {
     { auto c=_bus.config(); c.spi_host=SPI2_HOST; c.spi_mode=0;
@@ -115,13 +104,6 @@ public:
     { auto c=_light.config(); c.pin_bl=3; c.invert=false;
       c.freq=44100; c.pwm_channel=7;
       _light.config(c); _panel.setLight(&_light); }
-    { auto c=_touch.config();
-      c.x_min=0; c.x_max=239; c.y_min=0; c.y_max=239;
-      c.pin_int=TOUCH_INT; c.pin_rst=TOUCH_RST;
-      c.bus_shared=false; c.offset_rotation=0;
-      c.i2c_port=0; c.pin_sda=TOUCH_SDA; c.pin_scl=TOUCH_SCL;
-      c.freq=400000; c.i2c_addr=0x15;
-      _touch.config(c); _panel.setTouch(&_touch); }
     setPanel(&_panel);
   }
 };
@@ -155,6 +137,17 @@ struct Config {
   int    battWh = BATT_CAP_WH;
   // Ausrichtung der Anzeige: 0/1/2/3 entspricht 0/90/180/270 Grad.
   int    rotation = 0;
+  // Helligkeit der Hintergrundbeleuchtung, 5..255.
+  int    bright = 200;
+  // Nachtabschaltung: Minuten seit Mitternacht; -1 = ausgeschaltet.
+  // Das Fenster darf ueber Mitternacht reichen (z.B. 22:30 bis 06:00).
+  int    nightFrom = -1, nightTo = -1;
+  // Standort fuer die Wettervorhersage. 0/0 = noch nicht gesetzt, dann
+  // bleibt die Wetterseite leer.
+  float  lat = 0, lon = 0;
+  // Seriennummer der gewaehlten Solarbank. Leer = automatisch (dekodierte
+  // Generationen zuerst); gesetzt wird sie ueber die Weboberflaeche.
+  String devSn;
 };
 static Config cfg;
 
@@ -164,6 +157,33 @@ struct AnkerData {
   bool  valid=false;
 };
 static AnkerData gData;
+
+// Angezeigte Seite: 0 = Messwerte, 1 = Wetter. Ohne Touch wird ueber die
+// Weboberflaeche umgeschaltet; der Stand ueberdauert Neustarts bewusst nicht.
+static int gPage = 0;
+#define PAGES 2
+
+// ── Wettervorhersage ────────────────────────────────────────────────────────
+// Quelle: open-meteo.com - kostenlos, ohne Anmeldung und ohne Schluessel.
+// Das ist der Grund fuer die Wahl: wer das Projekt nachbaut, muss sich
+// nirgends registrieren.
+// ── Update-Anzeige ──────────────────────────────────────────────────────────
+// Kleiner Punkt oben rechts auf dem Display: gruen = aktuell, gelb = neuere
+// Beta verfuegbar, rot = neues Stable-Release erschienen (bis es auf der
+// Weboberflaeche quittiert wird). Geprueft wird gegen die manifest.json der
+// beiden Installer-Seiten - dieselbe Quelle, aus der auch geflasht wird.
+static int    gUpdState    = 0;    // 0=gruen 1=gelb 2=rot
+static String gBetaLatest, gStableLatest, gStableSeen;
+static unsigned long gUpdLast = 0;
+static bool          gUpdWanted = false;   // Pruefung angefordert
+static bool          gWdtOk     = false;   // Watchdog scharf?
+static bool          gHavePower = false;   // schon einmal Leistungen dekodiert?
+
+struct WxDay { float tmax=0, tmin=0, sunH=0, cloud=0, rain=0; };
+static WxDay         gWx[2];
+static float         gWxRad   = 0;     // aktuelle Globalstrahlung in W/m2
+static bool          gWxValid = false;
+static unsigned long gWxLast  = 0;
 
 static String        gAuthToken   = "";
 static String        gGtoken      = "";
@@ -183,6 +203,11 @@ static String gMqttHost, gMqttThing;          // Broker + Client-Kennung
 static String gMqttCert, gMqttKey, gMqttCa;   // PEM, echte Zeilenumbrueche
 static String gMqttCertId, gMqttUserId;       // fuer die Publish-client_id
 static String gDevSn, gDevPn;                 // Solarbank der gewaehlten Anlage
+// Alle Solarbanks der Anlage, fuer die Geraeteauswahl auf der Weboberflaeche
+#define MAX_BANKS 4
+struct BankEntry { String pn, sn, name; };
+static BankEntry gBanks[MAX_BANKS];
+static int       gBankCount=0;
 static String gGridSn, gGridPn;               // Netzzaehler
 // Teiler fuer die Rohwerte des Zaehlers – die Einheit ist geraeteabhaengig
 static float  gGridScale = 1.0f;
@@ -230,8 +255,6 @@ static SiteEntry gSiteList[10];
 static int       gSiteCount = 0;
 
 static bool gFixMode = false;
-static int  gPage    = 0;   // 0 = Messwerte, 1 = Netz und PV
-#define PAGES 2
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HILFSFUNKTIONEN
@@ -480,6 +503,13 @@ void loadConfig() {
   cfg.gridScale =prefs.getFloat("gridscale",0);
   cfg.battWh    =prefs.getInt("battwh",BATT_CAP_WH);
   cfg.rotation  =prefs.getInt("rot",0);
+  cfg.bright    =prefs.getInt("bright",200);
+  cfg.nightFrom =prefs.getInt("nfrom",-1);
+  cfg.nightTo   =prefs.getInt("nto",-1);
+  cfg.lat       =prefs.getFloat("lat",0);
+  cfg.lon       =prefs.getFloat("lon",0);
+  cfg.devSn     =prefs.getString("devsn","");
+  gStableSeen   =prefs.getString("seenstab","");
   prefs.end();
   Serial.printf("[Prefs] SSID=%s Email=%s Site=%s BattCap=%dWh\n",
     cfg.wifiSsid.c_str(),cfg.ankerEmail.c_str(),cfg.siteName.c_str(),cfg.battWh);
@@ -492,6 +522,12 @@ void saveConfig() {
   prefs.putFloat("gridscale",cfg.gridScale);
   prefs.putInt("battwh",cfg.battWh);
   prefs.putInt("rot",cfg.rotation);
+  prefs.putInt("bright",cfg.bright);
+  prefs.putInt("nfrom",cfg.nightFrom);
+  prefs.putInt("nto",cfg.nightTo);
+  prefs.putFloat("lat",cfg.lat);
+  prefs.putFloat("lon",cfg.lon);
+  prefs.putString("devsn",cfg.devSn);
   prefs.end(); Serial.println("[Prefs] OK");
 }
 void clearConfig(){prefs.begin("anker",false);prefs.clear();prefs.end();}
@@ -661,6 +697,9 @@ static int rawPost(const String& path, const String& body, String& outResp);
 void drawDisplay();
 static void applyGridScale();
 void handleSave();
+bool fetchWeather();
+static int cmpVer(const String& a, const String& b);
+static void checkUpdates();
 
 // Holt die Anlagenliste frisch von Anker. Im Normalbetrieb ist gSiteList
 // leer, weil sie sonst nur beim Einrichten gefuellt wird.
@@ -701,12 +740,51 @@ void handleStatus(){
   // dazu Anlagenname und Messwerte. snprintf wuerde sonst kommentarlos kuerzen.
   // static, nicht auf dem Stack: der Task-Stack ist knapp bemessen, und der
   // Webserver ruft die Funktion ohnehin nie verschachtelt auf.
-  static char b[5120];
+  static char b[8192];
   const char* mq = gMqtt.connected() ? "verbunden" : "getrennt";
+  // Nachtfenster als HH:MM fuer die Zeitfelder; unkonfiguriert = Vorschlag
+  char nf[6]="22:00", nt[6]="06:00";
+  if(cfg.nightFrom>=0) snprintf(nf,sizeof(nf),"%02d:%02d",cfg.nightFrom/60,cfg.nightFrom%60);
+  if(cfg.nightTo>=0)   snprintf(nt,sizeof(nt),"%02d:%02d",cfg.nightTo/60,cfg.nightTo%60);
+  // Standort als Text mit Punkt; leer statt "0.0000", solange keiner gesetzt ist
+  char latS[12]="", lonS[12]="";
+  if(cfg.lat!=0 || cfg.lon!=0){
+    snprintf(latS,sizeof(latS),"%.4f",cfg.lat);
+    snprintf(lonS,sizeof(lonS),"%.4f",cfg.lon);
+  }
+  // Solarbank-Auswahl: ein Link je gefundenem Geraet, das aktive in Weiss.
+  // Als String vorgebaut, weil die Anzahl der Geraete variabel ist.
+  String bankRow;
+  for(int i=0;i<gBankCount;i++){
+    bool cur = gBanks[i].sn==gDevSn;
+    bankRow += String("<a style='color:")+(cur?"#fff":"#f0a500")
+             + "' href='/device?sn="+gBanks[i].sn+"'>"+gBanks[i].pn
+             + " &middot; &hellip;"+gBanks[i].sn.substring(
+                 gBanks[i].sn.length()>4?gBanks[i].sn.length()-4:0)
+             + "</a>";
+    if(i<gBankCount-1) bankRow += " &nbsp;|&nbsp; ";
+  }
+  if(!gBankCount) bankRow = "keine gefunden";
+  // Update-Zeile passend zum Punkt auf dem Display
+  String updRow;
+  if(gUpdState==2)
+    updRow = String("<span style='color:#f66'>&#9679;</span> Neues Stable-Release ")
+           + gStableLatest + " &ndash; "
+             "<a style='color:#f0a500' href='https://deffel6.github.io/anker-solix-display/'>ansehen</a>"
+             " &middot; <a style='color:#f0a500' href='/updok'>quittieren</a>";
+  else if(gUpdState==1)
+    updRow = String("<span style='color:#f0a500'>&#9679;</span> Neue Beta ")
+           + gBetaLatest + " verf&uuml;gbar &ndash; "
+             "<a style='color:#f0a500' href='https://deffel6.github.io/anker-solix-display-beta/'>installieren</a>";
+  else
+    updRow = "<span style='color:#4caf50'>&#9679;</span> Firmware aktuell";
+  updRow += " &middot; <a style='color:#888' href='/updcheck'>jetzt pr&uuml;fen</a>";
+  updRow += "<br><span style='color:#555'>l&auml;uft: " FW_VERSION;
+  if(gBetaLatest.length()) updRow += ", Beta im Installer: " + gBetaLatest;
+  updRow += String(" &middot; Watchdog ") + (gWdtOk ? "scharf" : "aus") + "</span>";
   snprintf(b,sizeof(b),
     "<!DOCTYPE html><html lang='de'><head><meta charset='UTF-8'>"
     "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<meta http-equiv='refresh' content='10'>"
     "<title>%s &ndash; Anker Display</title><style>"
     "*{box-sizing:border-box;margin:0;padding:0}"
     "body{font-family:-apple-system,sans-serif;background:#0a0a0a;color:#eee;"
@@ -764,9 +842,52 @@ void handleStatus(){
     "<a style='color:#f0a500' href='/rotate?v=2'>180&deg;</a> &middot; "
     "<a style='color:#f0a500' href='/rotate?v=3'>270&deg;</a> "
     "(aktuell %d&deg;)</p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>Updates: %s</p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Solarbank der Anlage: %s "
+    "<span style='color:#555'>(Wechsel startet das Ger&auml;t neu)</span></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Anzeige auf dem Display: "
+    "<a style='color:%s' href='/page?v=0'>Messwerte</a> &middot; "
+    "<a style='color:%s' href='/page?v=1'>Wetter</a></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Standort f&uuml;rs Wetter (z.B. 51.5467 / 6.6006): "
+    "<form style='display:inline' action='/geo'>"
+    "<input name='lat' type='text' inputmode='decimal' value='%s' placeholder='Breite' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<input name='lon' type='text' inputmode='decimal' value='%s' placeholder='L&auml;nge' "
+    "style='width:6.5em;padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
+    "color:#f0a500;cursor:pointer'>setzen</button></form></p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Helligkeit: "
+    "<form style='display:inline' action='/bright'>"
+    "<input name='v' type='range' min='5' max='255' value='%d' "
+    "style='width:9em;vertical-align:middle;accent-color:#f0a500' "
+    "onchange='this.form.submit()'></form> (aktuell %d)</p>"
+    "<p style='color:#888;font-size:.8rem;margin-bottom:12px'>"
+    "Display nachts aus: "
+    "<form style='display:inline' action='/night'>"
+    "von <input name='from' type='time' value='%s' "
+    "style='padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "bis <input name='to' type='time' value='%s' "
+    "style='padding:4px 6px;background:#222;border:1px solid #333;"
+    "border-radius:6px;color:#eee'> "
+    "<button style='padding:5px 10px;background:#333;border:none;border-radius:6px;"
+    "color:#f0a500;cursor:pointer'>setzen</button></form> %s</p>"
     "<a class='btn' href='/akkus'>Akkupacks im Detail</a>"
     "<a class='sec' href='/sites'>Anlage wechseln</a>"
     "<a class='sec' href='/setup'>Zugangsdaten &auml;ndern</a>"
+    // Messwerte alle 10 s auffrischen - aber nicht mitten in einer Eingabe:
+    // ein Neuladen wuerde die Formularfelder auf die gespeicherten Werte
+    // zuruecksetzen (frueher passierte genau das per meta-refresh).
+    "<script>setInterval(function(){"
+    "var a=document.activeElement;"
+    "if(!a||(a.tagName!='INPUT'&&a.tagName!='BUTTON'))location.reload();"
+    "},10000);</script>"
     "</div></body></html>",
     cfg.siteName.c_str(), cfg.siteName.c_str(), mq, FW_VERSION,
     gData.solar_w, gData.battery_pct,
@@ -779,7 +900,15 @@ void handleStatus(){
     gPvStr[0]+gPvStr[1]+gPvStr[2]+gPvStr[3],
     (gPvWh[0]+gPvWh[1]+gPvWh[2]+gPvWh[3])/1000.0,
     gGridPn.length()?gGridPn.c_str():"Zaehler", gGridScale,
-    cfg.battWh, cfg.rotation*90);
+    cfg.battWh, cfg.rotation*90,
+    updRow.c_str(),
+    bankRow.c_str(),
+    gPage==0?"#fff":"#f0a500", gPage==1?"#fff":"#f0a500",
+    latS, lonS,
+    cfg.bright, cfg.bright, nf, nt,
+    cfg.nightFrom>=0
+      ? "<a style='color:#f0a500' href='/night?off=1'>ausschalten</a>"
+      : "(aus)");
   server.send(200,"text/html; charset=utf-8",b);
 }
 
@@ -855,6 +984,141 @@ void handlePacks(){
 
 // Teiler des Netzzaehlers von Hand setzen. Noetig, weil die Einheit je
 // Geraet verschieden ist und wir nicht jeden Zaehler kennen koennen.
+// ── Helligkeit und Nachtabschaltung ─────────────────────────────────────────
+static bool gNight=false;
+
+// Liegt die aktuelle Uhrzeit im eingestellten Nachtfenster? Das Fenster darf
+// ueber Mitternacht reichen (22:30 bis 06:00). Ohne gueltige Uhrzeit - NTP
+// noch nicht durch - bleibt das Display an: lieber eine Nacht hell als
+// tagsueber schwarz. Kurzer Timeout, sonst blockiert getLocalTime 5 s.
+static bool nightActive(){
+  if(cfg.nightFrom<0 || cfg.nightTo<0 || cfg.nightFrom==cfg.nightTo) return false;
+  struct tm ti;
+  if(!getLocalTime(&ti,10)) return false;
+  int m=ti.tm_hour*60+ti.tm_min;
+  if(cfg.nightFrom<cfg.nightTo) return m>=cfg.nightFrom && m<cfg.nightTo;
+  return m>=cfg.nightFrom || m<cfg.nightTo;
+}
+
+// Helligkeit anwenden: nachts aus, sonst der eingestellte Wert.
+static void applyBrightness(){
+  gNight=nightActive();
+  lcd.setBrightness(gNight?0:cfg.bright);
+}
+
+// Update-Pruefung von Hand ausloesen. Praktisch zum Testen und wenn man
+// nach einem Release nicht bis zum naechsten Sechs-Stunden-Takt warten will.
+void handleUpdCheck(){
+  // Nur vormerken, nicht hier pruefen: die Pruefung dauert Sekunden und
+  // braucht Speicher, den erst die MQTT-Verbindung freigeben muss. Beides
+  // gehoert nicht in einen Webserver-Handler - genau daran ist das Geraet
+  // eingefroren. loop() erledigt es gleich darauf.
+  gUpdWanted=true;
+  Serial.println("[UPD] Pruefung von Hand angefordert");
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Stable-Hinweis quittieren: der rote Punkt erlischt, bis das naechste
+// Stable-Release erscheint.
+void handleUpdOk(){
+  if(gStableLatest.length()){
+    gStableSeen=gStableLatest;
+    prefs.begin("anker",false);
+    prefs.putString("seenstab",gStableSeen);
+    prefs.end();
+    gUpdState = (gBetaLatest.length() && cmpVer(FW_VERSION,gBetaLatest)<0) ? 1 : 0;
+    drawDisplay();
+    Serial.printf("[UPD] Stable %s quittiert\n",gStableSeen.c_str());
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Solarbank der Anlage wechseln. Danach Neustart: MQTT-Abos und das Ziel
+// des Echtzeit-Triggers haengen an der Seriennummer, ein sauberer Neuaufbau
+// ist einfacher und sicherer als Umabonnieren im laufenden Betrieb.
+void handleDevice(){
+  String sn=server.arg("sn");
+  bool known=false;
+  for(int i=0;i<gBankCount;i++) if(gBanks[i].sn==sn) known=true;
+  if(known && sn!=gDevSn){
+    cfg.devSn=sn; saveConfig();
+    Serial.printf("[DEV] Solarbank gewechselt auf %s - Neustart\n",sn.c_str());
+    server.send(200,"text/html; charset=utf-8",FPSTR(HTML_SAVED));
+    delay(2500); ESP.restart(); return;
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Seite auf dem Display umschalten. Ohne Touch ist die Weboberflaeche der
+// einzige Schalter; die Wahl wirkt sofort.
+void handlePage(){
+  int v=server.arg("v").toInt();
+  if(v>=0 && v<PAGES){
+    gPage=v;
+    lcd.fillScreen(C_BLACK);
+    drawDisplay();
+    Serial.printf("[LCD] Seite %d\n",v);
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Standort fuer die Wettervorhersage setzen. Kommt mit Komma und Punkt
+// zurecht - deutsche Browser liefern je nach Feldtyp beides. Werte nahe
+// 0/0 (Golf von Guinea) sind mit Sicherheit ein Eingabefehler und werden
+// verworfen, statt die Wetterseite an einen falschen Ort zu haengen.
+//
+// Der Abruf selbst passiert NICHT hier: eine TLS-Verbindung blockiert den
+// Webserver mehrere Sekunden, und genau dann laeuft das automatische
+// Neuladen der Seite ins Leere. Stattdessen wird nur gWxLast genullt -
+// loop() holt die Vorhersage dann beim naechsten Durchlauf.
+void handleGeo(){
+  String fs=server.arg("lat"), ts=server.arg("lon");
+  fs.replace(',','.'); ts.replace(',','.');
+  float la=fs.toFloat(), lo=ts.toFloat();
+  bool ok = la>=-90 && la<=90 && lo>=-180 && lo<=180
+            && !(fabsf(la)<1 && fabsf(lo)<1);
+  if(ok){
+    cfg.lat=la; cfg.lon=lo; saveConfig();
+    Serial.printf("[WX] Standort %.4f / %.4f\n",la,lo);
+    gWxValid=false;
+    gWxLast=0;
+    if(gPage==1){ lcd.fillScreen(C_BLACK); drawDisplay(); }
+  } else {
+    Serial.printf("[WX] Standort verworfen: '%s' / '%s'\n",
+                  server.arg("lat").c_str(),server.arg("lon").c_str());
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Schieberegler der Startseite. Wirkt sofort und ueberdauert Neustarts.
+void handleBright(){
+  int v=server.arg("v").toInt();
+  if(v>=5 && v<=255){
+    cfg.bright=v; saveConfig();
+    applyBrightness();
+    Serial.printf("[LCD] Helligkeit %d\n",v);
+  }
+  server.sendHeader("Location","/"); server.send(302);
+}
+
+// Zeitfenster der Nachtabschaltung setzen; off=1 schaltet sie ab.
+void handleNight(){
+  if(server.hasArg("off")){
+    cfg.nightFrom=-1; cfg.nightTo=-1;
+  } else {
+    String f=server.arg("from"), t=server.arg("to");   // "HH:MM"
+    if(f.length()==5 && t.length()==5){
+      cfg.nightFrom=f.substring(0,2).toInt()*60+f.substring(3).toInt();
+      cfg.nightTo  =t.substring(0,2).toInt()*60+t.substring(3).toInt();
+    }
+  }
+  saveConfig();
+  applyBrightness();
+  Serial.printf("[LCD] Nachtfenster %d bis %d Minuten (-1 = aus)\n",
+                cfg.nightFrom,cfg.nightTo);
+  server.sendHeader("Location","/"); server.send(302);
+}
+
 // Ausrichtung der Anzeige drehen. Wirkt sofort - das Sprite ist quadratisch,
 // die Abmessungen aendern sich also nicht und es muss nichts neu angelegt
 // werden. Ein Neustart waere nur laestig.
@@ -900,6 +1164,13 @@ void startWebUi(){
   server.on("/akkus",      HTTP_GET,  handlePacks);
   server.on("/battwh",     HTTP_GET,  handleBattWh);
   server.on("/rotate",     HTTP_GET,  handleRotate);
+  server.on("/bright",     HTTP_GET,  handleBright);
+  server.on("/night",      HTTP_GET,  handleNight);
+  server.on("/page",       HTTP_GET,  handlePage);
+  server.on("/geo",        HTTP_GET,  handleGeo);
+  server.on("/device",     HTTP_GET,  handleDevice);
+  server.on("/updok",      HTTP_GET,  handleUpdOk);
+  server.on("/updcheck",   HTTP_GET,  handleUpdCheck);
   server.onNotFound([](){ server.sendHeader("Location","/"); server.send(302); });
   server.begin();
   Serial.printf("[Web] http://%s/\n",WiFi.localIP().toString().c_str());
@@ -1346,10 +1617,24 @@ static int rawPost(const String& path, const String& body, String& outResp) {
 // Holt einen JSON-Stringwert per Textsuche – spart den Speicher, den ein
 // DynamicJsonDocument fuer die 8 KB grosse MQTT-Antwort braeuchte.
 static String jsonStr(const String& json, const char* key) {
-  String pat=String("\"")+key+"\":\"";
+  String pat=String("\"")+key+"\"";
   int i=json.indexOf(pat);
   if(i<0) return "";
   i+=pat.length();
+  // Doppelpunkt und Leerraum ueberspringen: die Anker-API liefert kompaktes
+  // JSON ("version":"1.2.3"), eine von Hand gepflegte Datei dagegen
+  // eingerueckt ("version": "1.2.3"). Genau daran ist die Update-Pruefung
+  // gescheitert - sie las stumm einen leeren Wert.
+  auto skipWs=[&](int k){
+    while(k<(int)json.length() &&
+          (json[k]==' '||json[k]=='\t'||json[k]=='\n'||json[k]=='\r')) k++;
+    return k;
+  };
+  i=skipWs(i);
+  if(i>=(int)json.length()||json[i]!=':') return "";
+  i=skipWs(i+1);
+  if(i>=(int)json.length()||json[i]!='"') return "";
+  i++;
   int e=i;
   while(e<(int)json.length()){
     if(json[e]=='"'&&json[e-1]!='\\') break;
@@ -1400,8 +1685,11 @@ bool fetchMqttCreds(){
 // GERAETESUCHE – device_sn + product_code fuers MQTT-Topic:
 //   dt/{app_name}/{product_code}/{device_sn}/
 // ─────────────────────────────────────────────────────────────────────────────
-// Solarbank der gewaehlten Anlage bestimmen. get_site_detail liefert genau
-// die Geraete dieser site_id – solarbank_list[0] ist die Solarbank.
+// Alle Solarbanks der gewaehlten Anlage einsammeln. get_site_detail liefert
+// genau die Geraete dieser site_id. Bisher wurde stumpf solarbank_list[0]
+// genommen - bei Anlagen mit mehreren Speichern (z.B. alte E1600 neben der
+// aktuellen Bank) lauschte das Display dann am falschen Geraet und bekam
+// nie param_info-Nachrichten.
 bool fetchDeviceInfo(){
   Serial.println("=== GERAET ===");
   String resp;
@@ -1409,72 +1697,49 @@ bool fetchDeviceInfo(){
                    String("{\"site_id\":\"")+gSiteId+"\"}",resp);
   if(code!=200){Serial.printf("[DEV] HTTP %d\n",code);return false;}
   // Innerhalb solarbank_list suchen, damit nicht der Shelly erwischt wird
-  int sb=resp.indexOf("\"solarbank_list\":");
-  if(sb<0){
-    // Ohne Solarbank kein MQTT-Topic. Statt nur abzubrechen zeigen wir, was
-    // die Anlage stattdessen enthaelt - das Projekt kennt bisher nur die
-    // Solarbank, und ohne die Antwort laesst sich nicht sagen, was fehlt.
-    Serial.println("[DEV] keine solarbank_list. Gefundene Geraetelisten:");
-    int i=0, n=0;
-    while(true){
-      int k=resp.indexOf("_list\":",i);
-      if(k<0) break;
-      int st=resp.lastIndexOf('"',k);        // Anfang des Schluesselnamens
-      if(st>=0){
-        String key=resp.substring(st+1,k+5);
-        // Ist die Liste leer oder gefuellt?
-        int br=resp.indexOf('[',k);
-        bool leer = (br>=0 && resp.indexOf(']',br)==br+1);
-        Serial.printf("   %-24s %s\n",key.c_str(),leer?"leer":"GEFUELLT");
-        n++;
-      }
-      i=k+5;
-    }
-    if(!n) Serial.println("   keine einzige gefunden");
-    printLong("DEV",resp);
-
-    // Rueckfallweg: get_relate_and_bind_devices listet die Geraete des
-    // KONTOS statt der Anlage. Bei geteilten Konten oder frisch angelegten
-    // Anlagen fehlt die Solarbank in get_site_detail, steht dort aber drin.
-    Serial.println("[DEV] Zweitversuch ueber die Geraeteliste des Kontos");
-    String r2;
-    if(rawPost("power_service/v1/app/get_relate_and_bind_devices","{}",r2)!=200){
-      Serial.println("[DEV] auch das misslang");
-      return false;
-    }
-    printLong("DEV2",r2);   // Antwort zeigen, nicht nur auswerten
-    // Erste Solarbank suchen. Alle Modelle der Reihe beginnen mit A17C.
-    int pos=0;
-    while(true){
-      int k=r2.indexOf("\"product_code\":\"A17C",pos);
-      if(k<0) break;
-      String tail2=r2.substring(k);
-      gDevPn=jsonStr(tail2,"product_code");
-      // device_sn steht im selben Objekt, aber VOR product_code
-      int objStart=r2.lastIndexOf('{',k);
-      if(objStart>=0) gDevSn=jsonStr(r2.substring(objStart),"device_sn");
-      if(gDevSn.length()){
-        Serial.printf("[DEV] gefunden: %s  %s  (%s)\n",
-                      gDevPn.c_str(),gDevSn.c_str(),
-                      jsonStr(tail2,"device_name").c_str());
-        applyGridScale();
-        return true;
-      }
-      pos=k+20;
-    }
-    Serial.println("[DEV] keine Solarbank im Konto gefunden");
-
-    // Ein dritter Versuch ueber app/devicerelation/get_shared_device
-    // entfaellt: der Endpunkt verlangt die Seriennummer als Parameter, also
-    // genau das, was hier gesucht wird. Geprueft, liefert HTTP 400.
-    return false;
+  int sb=resp.indexOf("\"solarbank_list\":[");
+  if(sb<0){Serial.println("[DEV] keine solarbank_list");return false;}
+  // Array-Segment mit Klammerzaehler ausschneiden - die Eintraege koennen
+  // selbst Arrays enthalten, ein simples indexOf("]") griffe zu kurz.
+  int a=resp.indexOf('[',sb), depth=0, e=a;
+  for(; e<(int)resp.length(); e++){
+    if(resp[e]=='[') depth++;
+    else if(resp[e]==']'){ depth--; if(depth==0) break; }
   }
-  String tail=resp.substring(sb);
-  gDevPn=jsonStr(tail,"device_pn");
-  gDevSn=jsonStr(tail,"device_sn");
-  Serial.printf("[DEV] %s  %s  (%s)\n",
-                gDevPn.c_str(),gDevSn.c_str(),
-                jsonStr(tail,"device_name").c_str());
+  String seg=resp.substring(a,e+1);
+  gBankCount=0;
+  int pos=0;
+  while(gBankCount<MAX_BANKS){
+    int p=seg.indexOf("\"device_sn\"",pos);
+    if(p<0) break;
+    // Objektgrenzen grob: ab dem letzten '{' vor dem Fund bis zum Feldende
+    int os=seg.lastIndexOf('{',p);
+    String obj=seg.substring(os<0?0:os, seg.length());
+    gBanks[gBankCount].sn  =jsonStr(obj,"device_sn");
+    gBanks[gBankCount].pn  =jsonStr(obj,"device_pn");
+    gBanks[gBankCount].name=jsonStr(obj,"device_name");
+    if(gBanks[gBankCount].sn.length()) gBankCount++;
+    pos=p+11;
+  }
+  // Auswahl: 1. vom Nutzer festgelegte Seriennummer, 2. dekodierte
+  // Generationen (A17C5 zuerst, dann Solarbank 2), 3. der erste Eintrag.
+  int pick=-1;
+  for(int i=0;i<gBankCount;i++)
+    if(cfg.devSn.length() && gBanks[i].sn==cfg.devSn) pick=i;
+  if(pick<0){
+    const char* pref[]={"A17C5","A17C1","A17C3"};
+    for(int p2=0;p2<3 && pick<0;p2++)
+      for(int i=0;i<gBankCount && pick<0;i++)
+        if(gBanks[i].pn.startsWith(pref[p2])) pick=i;
+  }
+  if(pick<0 && gBankCount) pick=0;
+  for(int i=0;i<gBankCount;i++)
+    Serial.printf("[DEV] Solarbank %d: %s  %s  (%s)%s\n", i+1,
+                  gBanks[i].pn.c_str(), gBanks[i].sn.c_str(),
+                  gBanks[i].name.c_str(), i==pick?"  << gewaehlt":"");
+  if(pick<0){Serial.println("[DEV] keine Solarbank gefunden");return false;}
+  gDevPn=gBanks[pick].pn;
+  gDevSn=gBanks[pick].sn;
   // Netzzaehler aus grid_list – der misst den Netzbezug, nicht die Solarbank
   int gl=resp.indexOf("\"grid_list\":");
   if(gl>=0){
@@ -1570,8 +1835,51 @@ static void parsePackBlock(const uint8_t* d, uint8_t len){
        p.sn.c_str());
 }
 
+// Feldkarte einer unbekannten Nachricht ausgeben, hoechstens einmal pro
+// Minute je Kanal: 0 = Bank grosse Nachricht, 1 = Bank kleine, 2 = Zaehler.
+// Daraus laesst sich die Feldbelegung im Vergleich mit der App ablesen.
+static void printFieldMap(const uint8_t* b, size_t got, int chan, const char* label){
+  static unsigned long last[3]={0,0,0};
+  if(chan<0||chan>2) chan=2;
+  if(last[chan] && millis()-last[chan]<60000) return;
+  last[chan]=millis();
+  String map = String(label)+" typ="+String(b[7],HEX)+String(b[8],HEX)
+             + " len="+String((unsigned)got)+"\n";
+  size_t j=9;
+  while(j+1<got){
+    uint8_t tag=b[j], ln=b[j+1];
+    if(j+2+(size_t)ln>got) break;
+    const uint8_t* e=b+j+2;
+    char t[48];
+    uint8_t ty = ln?e[0]:0;
+    if(ln==5 && ty==0x05){ float v; memcpy(&v,e+1,4);
+      snprintf(t,sizeof(t),"%02x:f=%.1f ",tag,v); }
+    else if(ln==5 && ty==0x03){ uint32_t v; memcpy(&v,e+1,4);
+      snprintf(t,sizeof(t),"%02x:u32=%lu ",tag,(unsigned long)v); }
+    else if(ln==3 && ty==0x02){ int16_t v; memcpy(&v,e+1,2);
+      snprintf(t,sizeof(t),"%02x:i16=%d ",tag,(int)v); }
+    else if(ln==2 && ty==0x01){
+      snprintf(t,sizeof(t),"%02x:u8=%u ",tag,e[1]); }
+    else if(ty==0x00 && ln>1){
+      snprintf(t,sizeof(t),"%02x:s ",tag); }
+    else {
+      int p2=snprintf(t,sizeof(t),"%02x:%u/t%02x=",tag,ln,ty);
+      for(uint8_t k=1;k<ln && k<=6 && p2<(int)sizeof(t)-3;k++)
+        p2+=snprintf(t+p2,sizeof(t)-p2,"%02x",e[k]);
+      snprintf(t+p2,sizeof(t)-p2," ");
+    }
+    map+=t;
+    j+=2+ln;
+  }
+  Serial.println("[KARTE]");
+  printLong("KARTE",map);
+}
+
 // Dekodiert die param_info-Nutzlast und fuellt gData.
 // Rahmen und Feldkodierung siehe Kopfkommentar.
+// Die Solarbank 3 Pro (A17C5) kodiert Leistungen als float in ab/ac/ad und
+// die Strings in c6..c9; die Solarbank 2 Pro (A17C1) als u32 in ab und die
+// Strings in ca..cd, Ladestand in ad. Beide Wege werden unterstuetzt.
 static bool parseParamInfo(const String& b64){
   size_t need=0;
   mbedtls_base64_decode(nullptr,0,&need,(const uint8_t*)b64.c_str(),b64.length());
@@ -1580,7 +1888,20 @@ static bool parseParamInfo(const String& b64){
   if(!b) return false;
   size_t got=0;
   mbedtls_base64_decode(b,need,&got,(const uint8_t*)b64.c_str(),b64.length());
-  if(got<16||b[0]!=0xff||b[1]!=0x09){ free(b); return false; }
+  if(got<16||b[0]!=0xff||b[1]!=0x09){
+    // Fremder Rahmen - bei der Solarbank 2 kommt ein Nachrichtenpaar, dessen
+    // kleinere Haelfte nicht mit ff09 beginnt. Einmal pro Minute die ersten
+    // Bytes zeigen, damit sich auch dieses Format entschluesseln laesst.
+#if VERBOSE
+    static unsigned long lastBad=0;
+    if(millis()-lastBad>=60000){
+      lastBad=millis();
+      Serial.printf("[RAW] fremder Rahmen, %u B, Anfang:\n",(unsigned)got);
+      hexDump(b, got<96?got:96);
+    }
+#endif
+    free(b); return false;
+  }
 
   // Nachrichtentyp steht in Byte 7/8. Die Feldnummern bedeuten je Typ etwas
   // anderes, deshalb muss hier getrennt werden: 0405 traegt die Leistungen,
@@ -1613,6 +1934,11 @@ static bool parseParamInfo(const String& b64){
   bool  haveSolar=false;
   float solar=0, battW=0, outW=0, str[4]={0,0,0,0};
   int   soc=-1;
+  // Zweiter Satz fuer die Solarbank 2 (A17C1): dort sind die Leistungen
+  // u32 statt float, die Strings liegen in ca..cd, der Ladestand in ad.
+  bool     haveSolar2=false;
+  uint32_t solar2=0, str2[4]={0,0,0,0};
+  int      soc2=-1;
   String ints;                      // Kandidatenliste fuer den Ladestand
   size_t i=9;                       // 9 Byte Rahmen, dann Felder
   while(i+1<got){
@@ -1631,6 +1957,16 @@ static bool parseParamInfo(const String& b64){
         case 0xc9: str[3]=v; break;
       }
     }
+    if(ln==5 && d[0]==0x03){        // u32 - Kodierung der Solarbank 2
+      uint32_t v; memcpy(&v,d+1,4);
+      switch(tag){
+        case 0xab: solar2=v; haveSolar2=true; break;
+        case 0xca: str2[0]=v; break;
+        case 0xcb: str2[1]=v; break;
+        case 0xcc: str2[2]=v; break;
+        case 0xcd: str2[3]=v; break;
+      }
+    }
     // Alle 1-Byte-Werte 0..100 sammeln – einer davon ist der Ladestand
     if(ln==2 && d[0]==0x01 && d[1]<=100){
       char t[16]; snprintf(t,sizeof(t),"%02x=%u ",tag,d[1]);
@@ -1640,16 +1976,38 @@ static bool parseParamInfo(const String& b64){
       // Liegen Packdaten vor, wird er weiter unten ueberschrieben; bis dahin
       // ist er die beste verfuegbare Angabe.
       if(tag==0xa3) soc=d[1];
+      // Bei der Solarbank 2 steht der Ladestand in 0xad (gegen die App
+      // geprueft: 41/42 dort wie hier).
+      if(tag==0xad) soc2=d[1];
     }
     i+=2+ln;
   }
-  free(b);
+  // Solarbank-2-Werte in die gemeinsamen Variablen uebernehmen. Nur wenn die
+  // Summe der Strings zum Gesamtwert passt - das war in allen mitgelesenen
+  // Karten der Fall und schuetzt vor einer Fehldeutung des Feldes ab.
+  // Akku- und Ausgangsleistung der Solarbank 2 sind noch nicht dekodiert
+  // (sie liegen im kleinen Nachrichtenteil); bis dahin bleiben sie 0.
+  if(!haveSolar && haveSolar2){
+    uint32_t sum=str2[0]+str2[1]+str2[2]+str2[3];
+    if(sum==solar2 || solar2<=1){
+      haveSolar=true;
+      solar=solar2;
+      for(int k=0;k<4;k++) str[k]=str2[k];
+      if(soc2>=0) soc=soc2;
+    }
+  }
   if(!haveSolar){
-    // 425-Byte-Variante ohne 0xab – nur einmal melden, nicht bei jeder Nachricht
-    static bool once=false;
-    if(!once){ once=true; Serial.println("[BANK] Nebennachricht ohne 0xab – ignoriert"); }
+    // Weder 3-Pro- noch 2-Pro-Felder gefunden: Feldkarte ausgeben, um die
+    // Belegung per Vergleich mit der App zu entschluesseln.
+    // Nur ausgeben, solange von diesem Geraet noch nie Leistungswerte kamen.
+    // Sonst meldet sich bei einer laufenden Solarbank 3 Pro jede Minute die
+    // Begleitnachricht, die gar keine Leistungen traegt.
+    if(!gHavePower)
+      printFieldMap(b, got, got>300?0:1, "Bank ohne Leistungsfelder,");
+    free(b);
     return false;
   }
+  free(b);
 
   // Ladestand des Gesamtsystems statt nur der Kopfstation. 0xa3 meldet nur
   // die Haupteinheit; die App zeigt den Systemwert. Solange die Packdaten
@@ -1674,6 +2032,7 @@ static bool parseParamInfo(const String& b64){
     gData.battery_wh = soc/100.0f*cfg.battWh;
   }
   gData.valid=true;
+  gHavePower=true;
   for(int k=0;k<4;k++) gPvStr[k]=str[k];
   integrateEnergy();
   LOGF("[PV] %.0f W = %.0f+%.0f+%.0f+%.0f | Akku %.0f W | Aus %.0f W\n",
@@ -1724,6 +2083,10 @@ static bool parseGridInfo(const String& b64){
     }
     i+=2+ln;
   }
+  // Beim Anker Smart Meter (A17X7) stehen a8/a9 konstant auf 0, obwohl die
+  // App Netzbezug zeigt - der echte Wert steckt in einem anderen Feld.
+  // Feldkarte ausgeben (1x/Minute), bis die Belegung geklaert ist.
+  if(imp==0 && exp_==0) printFieldMap(b, got, 2, "Zaehler,");
   free(b);
   if(!have) return false;
 
@@ -1930,6 +2293,15 @@ bool fetchData(){
 // ─────────────────────────────────────────────────────────────────────────────
 // DISPLAY ZEICHNEN
 // ─────────────────────────────────────────────────────────────────────────────
+// Update-Punkt oben rechts, auf jeder Seite. Position liegt sicher innerhalb
+// des runden Panels (Abstand zum Mittelpunkt ~101 von 120 Pixeln).
+static void drawUpdateDot(lgfx::LovyanGFX* g){
+  uint32_t col = gUpdState==2 ? C_RED
+               : gUpdState==1 ? C_YELLOW
+               :                C_GREEN;
+  g->fillCircle(204,64,5,col);
+}
+
 static void drawMain(){
   bool useSprite=spr.getBuffer()!=nullptr;
   lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
@@ -2010,14 +2382,270 @@ static void drawMain(){
 
   g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(flowCol,C_BLACK);
   g->drawString(flowLabel,120,174);
-  g->setTextColor(C_GRAY,C_BLACK);
-  g->drawString("wischen >",120,212);
   g->setFont(&fonts::FreeSansBold12pt7b);
   g->setTextColor(hasFlow?C_WHITE:C_GRAY,C_BLACK);
   snprintf(buf,sizeof(buf),"%.0fW",flowVal);
   g->drawString(buf,120,192);
 
+  drawUpdateDot(g);
   if(useSprite) spr.pushSprite(0,0);
+}
+
+// ── Wetter-Piktogramme ──────────────────────────────────────────────────────
+// Aus Kreisen, Rechtecken und Linien gezeichnet - die GFX-Schriften
+// enthalten keine Wettersymbole. u ist die Grundgroesse in Pixeln.
+static void icSun(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t col){
+  g->fillCircle(cx,cy,u,col);
+  static const int8_t d[8][2]={{1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}};
+  for(int i=0;i<8;i++){
+    int f=(i<4)?10:7;                  // Diagonalstrahlen kuerzen (~1/sqrt2)
+    int x1=cx+d[i][0]*(u+3)*f/10, y1=cy+d[i][1]*(u+3)*f/10;
+    int x2=cx+d[i][0]*(u+7)*f/10, y2=cy+d[i][1]*(u+7)*f/10;
+    g->drawLine(x1,y1,x2,y2,col);
+    g->drawLine(x1+1,y1,x2+1,y2,col);  // zweite Linie macht den Strahl dicker
+  }
+}
+static void icCloud(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t col){
+  g->fillCircle(cx-u,cy,u*3/4,col);
+  g->fillCircle(cx+u,cy,u*3/4,col);
+  g->fillCircle(cx-u/4,cy-u/2,u,col);
+  g->fillRect(cx-u,cy-u/4,2*u,u,col);
+}
+static void icSunCloud(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t sun,uint32_t cloud){
+  icSun(g,cx-u/2,cy-u/2,u*2/3,sun);    // Sonne lugt oben links hervor
+  icCloud(g,cx+u/4,cy+u/3,u*3/4,cloud);
+}
+static void icRain(lgfx::LovyanGFX* g,int cx,int cy,int u,uint32_t cloud,uint32_t drop){
+  icCloud(g,cx,cy-u/3,u,cloud);
+  for(int i=-1;i<=1;i++){              // drei schraege Tropfenstriche
+    int x=cx+i*u*3/4, y=cy+u*2/3;
+    g->drawLine(x,y,x-2,y+u/2,drop);
+    g->drawLine(x+1,y,x-1,y+u/2,drop);
+  }
+}
+static void icDrop(lgfx::LovyanGFX* g,int cx,int cy,uint32_t col){
+  g->fillTriangle(cx,cy-7,cx-3,cy,cx+3,cy,col);
+  g->fillCircle(cx,cy,3,col);
+}
+
+// Wetterseite: Vorhersage fuer heute und morgen. Je Tag ein grosses Symbol
+// nach Lage (Regen schlaegt Wolken, Wolken schlagen Sonne), darunter
+// Hoechst-/Tiefsttemperatur, Sonnenstunden und Regenmenge.
+static void drawWeather(){
+  bool useSprite=spr.getBuffer()!=nullptr;
+  lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
+  g->fillScreen(C_BLACK);
+  g->setTextDatum(lgfx::TC_DATUM);
+  char b[20];
+
+  struct tm ti;
+  if(getLocalTime(&ti)){
+    char t[6];
+    strftime(t,sizeof(t),"%H:%M",&ti);
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_WHITE,C_BLACK);
+    g->drawString(t,120,12);
+  }
+
+  if(cfg.lat==0 && cfg.lon==0){
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+    g->drawString("WETTER",120,86);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString("Standort fehlt",120,116);
+    g->drawString("im Browser eintragen",120,138);
+    if(useSprite) spr.pushSprite(0,0);
+    return;
+  }
+  if(!gWxValid){
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+    g->drawString("WETTER",120,96);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
+    g->drawString("keine Daten",120,126);
+    if(useSprite) spr.pushSprite(0,0);
+    return;
+  }
+
+  g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_ORANGE,C_BLACK);
+  g->drawString("HEUTE",68,42);
+  g->drawString("MORGEN",172,42);
+  g->drawFastVLine(120,48,136,lcd.color888(45,45,45));
+
+  for(int d=0;d<2;d++){
+    int cx = d?172:68;
+    WxDay& w=gWx[d];
+    if(w.rain>=1.0f)    icRain(g,cx,84,13,C_GRAY,C_BLUE);
+    else if(w.cloud>65) icCloud(g,cx,84,13,C_GRAY);
+    else if(w.cloud>25) icSunCloud(g,cx,84,13,C_YELLOW,C_GRAY);
+    else                icSun(g,cx,84,14,C_YELLOW);
+
+    snprintf(b,sizeof(b),"%.0f/%.0f",w.tmax,w.tmin);
+    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_WHITE,C_BLACK);
+    g->drawString(b,cx,114);
+
+    icSun(g,cx-34,153,4,C_YELLOW);
+    snprintf(b,sizeof(b),"%.1fh",w.sunH);
+    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_WHITE,C_BLACK);
+    g->drawString(b,cx+4,146);
+
+    icDrop(g,cx-34,177,w.rain>0.5f?C_BLUE:C_GRAY);
+    snprintf(b,sizeof(b),"%.1fmm",w.rain);
+    g->setTextColor(w.rain>0.5f?C_BLUE:C_GRAY,C_BLACK);
+    g->drawString(b,cx+4,170);
+  }
+
+  // Aktuelle Globalstrahlung, unten mittig. Aus demselben Abruf wie die
+  // Vorhersage, also hoechstens 30 Minuten alt.
+  snprintf(b,sizeof(b),"%.0f W/qm",gWxRad);
+  g->setFont(&fonts::FreeSans9pt7b);
+  g->setTextColor(gWxRad>=1.0f?C_YELLOW:C_GRAY,C_BLACK);
+  g->drawString(b,126,198);
+  icSun(g,126-(int)strlen(b)*5-12,206,4,gWxRad>=1.0f?C_YELLOW:C_GRAY);
+
+  drawUpdateDot(g);
+  if(useSprite) spr.pushSprite(0,0);
+}
+
+void drawDisplay(){
+  if(gPage==1) drawWeather();
+  else         drawMain();
+}
+
+// Holt die Vorhersage fuer heute und morgen von open-meteo.com. Wird alle
+// 30 Minuten aufgefrischt - das Modell rechnet stuendlich, oefter waere
+// sinnlos.
+bool fetchWeather(){
+  if(cfg.lat==0 && cfg.lon==0) return false;
+  // Bewusst unverschluesselt: parallel zur stehenden MQTT-TLS-Verbindung
+  // reicht der Speicher des C3 nicht fuer einen zweiten TLS-Handshake -
+  // genau beim Abruf ist das Geraet abgestuerzt. Wetterdaten sind
+  // oeffentlich, HTTP genuegt; die API antwortet ohne Umleitung.
+  WiFiClient c;
+  HTTPClient h;
+  String url = "http://api.open-meteo.com/v1/forecast?latitude="+String(cfg.lat,4)
+             + "&longitude="+String(cfg.lon,4)
+             + "&daily=temperature_2m_max,temperature_2m_min,sunshine_duration,"
+               "cloud_cover_mean,precipitation_sum"
+               "&current=shortwave_radiation&forecast_days=2&timezone=auto";
+  h.begin(c,url);
+  h.setTimeout(10000);
+  int code=h.GET();
+  if(code!=200){ Serial.printf("[WX] HTTP %d\n",code); h.end(); return false; }
+  String body=h.getString(); h.end();
+
+  DynamicJsonDocument doc(2048);
+  if(deserializeJson(doc,body)!=DeserializationError::Ok){
+    Serial.println("[WX] JSON-Fehler"); return false;
+  }
+  JsonObject d=doc["daily"];
+  if(d.isNull()){ Serial.println("[WX] kein daily-Block"); return false; }
+  for(int i=0;i<2;i++){
+    gWx[i].tmax = d["temperature_2m_max"][i] | 0.0f;
+    gWx[i].tmin = d["temperature_2m_min"][i] | 0.0f;
+    gWx[i].sunH = (d["sunshine_duration"][i] | 0.0f) / 3600.0f;
+    gWx[i].cloud= d["cloud_cover_mean"][i]   | 0.0f;
+    gWx[i].rain = d["precipitation_sum"][i]  | 0.0f;
+  }
+  gWxRad = doc["current"]["shortwave_radiation"] | 0.0f;
+  gWxValid=true;
+  Serial.printf("[WX] heute %.0f/%.0f C  %.1f h Sonne  %.0f%% Wolken  %.1f mm  %.0f W/m2\n",
+                gWx[0].tmax,gWx[0].tmin,gWx[0].sunH,gWx[0].cloud,gWx[0].rain,gWxRad);
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UPDATE-PRUEFUNG
+// ─────────────────────────────────────────────────────────────────────────────
+// "1.18.0" vs "1.17.2": Vergleich stellenweise als Zahlen
+static int cmpVer(const String& a, const String& b){
+  int x[3]={0,0,0}, y[3]={0,0,0};
+  sscanf(a.c_str(),"%d.%d.%d",&x[0],&x[1],&x[2]);
+  sscanf(b.c_str(),"%d.%d.%d",&y[0],&y[1],&y[2]);
+  for(int i=0;i<3;i++){ if(x[i]!=y[i]) return x[i]<y[i]?-1:1; }
+  return 0;
+}
+
+// Holt "version" aus einer manifest.json. GitHub Pages gibt es nur ueber
+// HTTPS - deshalb wird diese Funktion nur gerufen, wenn genug Speicher am
+// Stueck frei ist (siehe checkUpdates).
+static String fetchManifestVersion(const char* url){
+  WiFiClientSecure c; c.setInsecure();
+  HTTPClient h;
+  h.begin(c,url); h.setTimeout(8000);
+  int code=h.GET();
+  String v="";
+  if(code==200){ String body=h.getString(); v=jsonStr(body,"version"); }
+  else Serial.printf("[UPD] HTTP %d fuer %s\n",code,url);
+  h.end();
+  return v;
+}
+
+// Pruefung im laufenden Betrieb. Die MQTT-Verbindung wird dafuer getrennt:
+// ihr TLS-Zustand belegt rund 45 kB am Stueck, und genau die fehlen der
+// zweiten verschluesselten Verbindung. loop() baut MQTT gleich danach wieder
+// auf, das kostet ein paar Sekunden ohne Live-Werte - deutlich besser als
+// ein haengendes Geraet.
+static void checkUpdates();
+static void runUpdateCheck(){
+  bool wasUp = gMqtt.connected();
+  if(wasUp){
+    Serial.println("[UPD] MQTT kurz getrennt, um Speicher freizugeben");
+    gMqtt.disconnect();
+    gMqttNet.stop();
+    delay(250);      // dem Speicher Zeit geben, wieder zusammenzuwachsen
+  }
+  checkUpdates();
+  gUpdLast=millis();
+  if(wasUp) gMqttLastTry=0;      // sofortiger Neuaufbau in loop()
+}
+
+// Vergleicht die laufende Firmware mit den beiden Installern.
+//   gelb: der Beta-Installer traegt eine neuere Version als dieses Geraet
+//   rot:  ein Stable-Release, das noch nicht quittiert wurde
+// Rot schlaegt Gelb. Ohne genug freien Speicher wird die Pruefung
+// uebersprungen - ein doppelter TLS-Handshake neben MQTT war der
+// Absturzgrund der fruehen Wetterseite.
+static void checkUpdates(){
+  // Das Sprite wird NICHT mehr freigegeben, um Platz zu schaffen: nach der
+  // Pruefung liess es sich nicht zuverlaessig zurueckholen, und ohne Sprite
+  // zeichnet das Display direkt aufs Panel - es flackert. Stattdessen laeuft
+  // die erste Pruefung beim Start, bevor die MQTT-Verbindung steht; dort ist
+  // reichlich Speicher frei. Im Betrieb wird nur gemessen und notfalls
+  // uebersprungen.
+  // Schwelle bewusst niedrig: der TLS-Handshake belegt nicht einen einzigen
+  // grossen Block, sondern mehrere mittlere. Gemessen hat sich MQTT direkt
+  // nach dem Trennen mit 38,9 kB groesstem Block problemlos neu verbunden -
+  // die fruehere Grenze von 40 kB hat die Pruefung deshalb immer verworfen.
+  bool tooTight = ESP.getMaxAllocHeap()<25000;
+  Serial.printf("[UPD] Speicher: frei %u, groesster Block %u%s\n",
+                (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMaxAllocHeap(),
+                tooTight?" - zu wenig, uebersprungen":"");
+  String beta, stab;
+  if(!tooTight){
+  beta = fetchManifestVersion("https://deffel6.github.io/anker-solix-display-beta/manifest.json");
+  stab = fetchManifestVersion("https://deffel6.github.io/anker-solix-display/manifest.json");
+  }
+  if(tooTight) return;
+  if(beta.length()) gBetaLatest  =beta;
+  if(stab.length()) gStableLatest=stab;
+  // Erstes gesehenes Stable-Release nur merken, nicht melden - sonst
+  // leuchtet der Punkt nach jeder Neuinstallation grundlos rot.
+  if(gStableLatest.length() && gStableSeen.isEmpty()){
+    gStableSeen=gStableLatest;
+    prefs.begin("anker",false);
+    prefs.putString("seenstab",gStableSeen);
+    prefs.end();
+  }
+  int st=0;
+  if(gBetaLatest.length() && cmpVer(FW_VERSION,gBetaLatest)<0) st=1;
+  if(gStableLatest.length() && gStableSeen.length()
+     && cmpVer(gStableSeen,gStableLatest)<0) st=2;
+  if(st!=gUpdState){
+    gUpdState=st;
+    drawDisplay();          // Punkt sofort umfaerben
+  }
+  Serial.printf("[UPD] laufend %s | Beta %s | Stable %s (quittiert %s) -> %s\n",
+                FW_VERSION, gBetaLatest.c_str(), gStableLatest.c_str(),
+                gStableSeen.c_str(),
+                st==2?"ROT":st==1?"GELB":"GRUEN");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2027,13 +2655,14 @@ void setup(){
   Serial.begin(115200); delay(300);
   Serial.println("\n[BOOT] Anker Display " FW_VERSION);
   lcd.init();
-  { // Ausrichtung vor dem ersten Zeichnen setzen. loadConfig() kommt erst
-    // spaeter, deshalb hier direkt aus dem NVS lesen.
+  { // Ausrichtung und Helligkeit vor dem ersten Zeichnen setzen. loadConfig()
+    // kommt erst spaeter, deshalb hier direkt aus dem NVS lesen.
     prefs.begin("anker",true);
     lcd.setRotation(prefs.getInt("rot",0)&3);
+    lcd.setBrightness(prefs.getInt("bright",200));
     prefs.end();
   }
-  lcd.setBrightness(200); lcd.fillScreen(C_BLACK);
+  lcd.fillScreen(C_BLACK);
   spr.setColorDepth(8);
   if(!spr.createSprite(240,240)) Serial.println("[SPR] RAM zu wenig");
   else                           Serial.println("[SPR] OK");
@@ -2071,109 +2700,35 @@ void setup(){
   if(!ankerLogin()){startFixPortal();return;}
 
   gSiteId=cfg.siteId;
+  // Update-Pruefung noch vor der MQTT-Verbindung: jetzt ist der Speicher
+  // unzerstueckelt, der TLS-Handshake gelingt zuverlaessig.
+  checkUpdates();
+  gUpdLast=millis();
   if(fetchMqttCreds() && fetchDeviceInfo()) mqttConnect();
   // fetchData() entfaellt: get_scen_info liefert nur 463, die Werte
   // kommen jetzt vollstaendig ueber MQTT.
   startWebUi();
   lcd.fillScreen(C_BLACK);
   drawDisplay();
-}
 
-// Zweite Seite: Netzwerk und Zustand. Ueber die IP laeuft die Weboberflaeche,
-// und genau die sucht man erfahrungsgemaess dann, wenn das Geraet schon
-// irgendwo haengt und man nicht mehr an den seriellen Anschluss kommt.
-static void drawInfo(){
-  bool useSprite=spr.getBuffer()!=nullptr;
-  lgfx::LovyanGFX* g=useSprite?(lgfx::LovyanGFX*)&spr:(lgfx::LovyanGFX*)&lcd;
-  g->fillScreen(C_BLACK);
-  g->setTextDatum(lgfx::TC_DATUM);
-  char b[16];
-
-  bool wifi = WiFi.status()==WL_CONNECTED;
-  g->setFont(&fonts::FreeSansBold12pt7b);
-  g->setTextColor(wifi?C_GREEN:C_RED,C_BLACK);
-  g->drawString(wifi?WiFi.localIP().toString().c_str():"kein WLAN",120,42);
-
-  // Beschriftung klein ueber dem Wert. Nebeneinander wuerden Label und Wert
-  // in der grossen Schrift zusammenstossen - zwei Spalten lassen dafuer
-  // nicht genug Breite. Die Ueberschrift "PANELS" entfaellt dadurch.
-  for(int i=0;i<4;i++){
-    int col=(i&1)?168:72, row=(i<2)?72:116;
-    snprintf(b,sizeof(b),"PV%d",i+1);
-    g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_GRAY,C_BLACK);
-    g->drawString(b,col,row);
-    snprintf(b,sizeof(b),"%.0f W",gPvStr[i]);
-    g->setFont(&fonts::FreeSansBold12pt7b); g->setTextColor(C_YELLOW,C_BLACK);
-    g->drawString(b,col,row+14);
+  // Watchdog gegen das Einfrieren: bleibt loop() laenger als 60 s stehen,
+  // startet das Geraet von selbst neu. 60 s deshalb, weil eine zaehe
+  // MQTT-Neuverbindung plus Wetterabruf zusammen schon eine halbe Minute
+  // dauern koennen - ein echter Haenger ist dagegen endlos.
+  // Erst hier am Ende von setup(): die Portale (startConfigPortal,
+  // startFixPortal) kehren nie zurueck und duerfen nicht ueberwacht werden.
+  {
+    esp_task_wdt_config_t wc = {
+      .timeout_ms = 60000, .idle_core_mask = 0, .trigger_panic = true };
+    esp_err_t cfg = esp_task_wdt_reconfigure(&wc);
+    if(cfg!=ESP_OK) cfg = esp_task_wdt_init(&wc);
+    // Rueckmeldung auswerten statt blind Vollzug zu melden: nur wenn die
+    // Anmeldung geklappt hat, startet ein haengendes Geraet auch wirklich
+    // von selbst neu.
+    gWdtOk = (esp_task_wdt_add(NULL)==ESP_OK);
+    Serial.printf("[SYS] Watchdog %s (cfg=%d)\n",
+                  gWdtOk ? "scharf, 60 s" : "NICHT aktiv", (int)cfg);
   }
-
-  g->setFont(&fonts::FreeSans9pt7b); g->setTextColor(C_ORANGE,C_BLACK);
-  g->drawString("AKKU",120,162);
-
-  // Je Pack ein Wert, wie in der App. Gemittelt ueber die vier Fuehler des
-  // Packs - einzeln weichen sie um bis zu ein Grad voneinander ab.
-  int n=0; String line;
-  for(int k=0;k<MAX_PACKS && n<3;k++){
-    if(!gPacks[k].valid) continue;
-    int sum=0;
-    for(int t=0;t<4;t++) sum+=gPacks[k].temp[t];
-    // Kein Gradzeichen: die GFX-Schriften decken nur 0x20..0x7E ab,
-    // 0xB0 kaeme als Luecke heraus.
-    snprintf(b,sizeof(b),"%dC", (int)(sum/40.0f+0.5f));
-    if(n) line+="  ";
-    line+=b; n++;
-  }
-  g->setFont(&fonts::FreeSansBold12pt7b);
-  g->setTextColor(n?C_WHITE:C_GRAY,C_BLACK);
-  g->drawString(n?line.c_str():"--",120,178);
-
-  if(useSprite) spr.pushSprite(0,0);
-}
-
-void drawDisplay(){
-  if(gPage==1) drawInfo(); else drawMain();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TOUCH
-// Nur die waagerechte Wischgeste wird ausgewertet. Ein Antippen soll nichts
-// ausloesen - das Geraet haengt an der Wand und wird beim Abstauben beruehrt.
-// ─────────────────────────────────────────────────────────────────────────────
-static void handleTouch(){
-  static bool     down=false;
-  static int32_t  xMin=0,xMax=0;
-  static uint32_t tStart=0, samples=0;
-  int32_t x,y;
-
-  if(lcd.getTouch(&x,&y)){
-    if(!down){ down=true; xMin=xMax=x; tStart=millis(); samples=0; }
-    if(x<xMin) xMin=x;
-    if(x>xMax) xMax=x;
-    samples++;
-    return;
-  }
-  if(!down) return;
-
-  down=false;
-  uint32_t dur=millis()-tStart;
-  int32_t  span=xMax-xMin;
-
-  // Nur Wischen wechselt die Seite, Antippen nicht - das Geraet haengt an
-  // der Wand und wird beim Abstauben beruehrt. Gemessen wird die groesste
-  // Spanne waehrend der Beruehrung, nicht die Differenz zwischen erstem und
-  // letztem Wert: der CST816S antwortet zeitweise gar nicht, und dann waere
-  // die Differenz null, obwohl gewischt wurde.
-  // Obergrenze 2500 ms statt 1500: eine gemessene Wischbewegung dauerte
-  // 1018 ms, das lag zu dicht an der Grenze. Bedaechtiges Wischen fiel sonst
-  // wortlos durch. Ein versehentlich aufgelegter Handballen dauert laenger
-  // und wird weiterhin abgewiesen.
-  if(span>30 && dur<2500){
-    gPage = (gPage+1) % PAGES;
-    lcd.fillScreen(C_BLACK);
-    drawDisplay();
-  }
-  LOGF("[TOUCH] Seite %d  abtastungen=%lu strecke=%ld dauer=%lums\n",
-       gPage,(unsigned long)samples,(long)span,(unsigned long)dur);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2182,7 +2737,22 @@ static void handleTouch(){
 static unsigned long lastFetch=0, lastClock=0;
 void loop(){
   unsigned long now=millis();
-  handleTouch();           // Wischgeste auswerten
+  esp_task_wdt_reset();    // Lebenszeichen an den Watchdog
+  // Speicherwache: einmal alle 10 Minuten Stand ins Log. Ist der groesste
+  // zusammenhaengende Block unter 16 KB gefallen, ist der Speicher so
+  // zerstueckelt, dass die naechste TLS-Verbindung ohnehin scheitert -
+  // dann lieber ein kontrollierter Neustart als spaeter ein Haenger.
+  static unsigned long lastHeapLog=0;
+  if(now-lastHeapLog>=600000){
+    lastHeapLog=now;
+    Serial.printf("[SYS] Heap %u, groesster Block %u\n",
+                  (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMaxAllocHeap());
+    if(ESP.getMaxAllocHeap()<16384){
+      Serial.println("[SYS] Speicher zerstueckelt - Neustart");
+      delay(200);
+      ESP.restart();
+    }
+  }
   server.handleClient();   // Weboberflaeche bedienen
   // MQTT am Leben halten – ohne loop() kommen keine Nachrichten an
   if(gMqtt.connected()){
@@ -2207,6 +2777,35 @@ void loop(){
   if(now-lastFetch>=2000){
     if(WiFi.status()!=WL_CONNECTED){WiFi.reconnect();delay(3000);}
     drawDisplay(); lastFetch=now;
+  }
+  // Wetter alle 30 Minuten - das Modell rechnet stuendlich, oefter waere
+  // sinnlos. Der erste Abruf passiert beim ersten Schleifendurchlauf.
+  if(cfg.lat!=0 || cfg.lon!=0){
+    if(gWxLast==0 || now-gWxLast>=1800000UL){
+      gWxLast=now;
+      fetchWeather();
+    }
+  }
+  // Update-Pruefung: erstmals zwei Minuten nach dem Start (dann haben sich
+  // MQTT und Wetter eingeschwungen), danach alle 6 Stunden.
+  if(gUpdWanted || (gUpdLast && now-gUpdLast>=21600000UL)){
+    gUpdWanted=false;
+    runUpdateCheck();
+  }
+  // Sicherheitsnetz gegen Flackern: fehlt das Sprite - etwa weil einmal zu
+  // wenig Speicher am Stueck frei war -, alle 10 s neu versuchen.
+  static unsigned long lastSpr=0;
+  if(spr.getBuffer()==nullptr && now-lastSpr>=10000){
+    lastSpr=now;
+    spr.setColorDepth(8);
+    if(spr.createSprite(240,240)) Serial.println("[SPR] wieder angelegt");
+  }
+  // Nachtabschaltung: einmal pro Minute pruefen reicht. Bei Aenderungen
+  // ueber die Weboberflaeche greift applyBrightness() dort sofort.
+  static unsigned long lastNight=0;
+  if(now-lastNight>=60000){
+    lastNight=now;
+    applyBrightness();
   }
   // Uhr auch ohne gueltige Daten weiterlaufen lassen
   if(now-lastClock>=30000){

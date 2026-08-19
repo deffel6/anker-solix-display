@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Anker Solix Display – Installation</title>
+<title>Anker Solix Display BETA – Installation (Ausweichseite)</title>
 <script type="module"
         src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
 <style>
@@ -73,8 +73,8 @@
 <body>
 <div class="wrap">
 
-  <h1>⚡ Anker Solix Display</h1>
-  <p class="sub">Testversion 1.29.0 – ohne Touch, mit Helligkeitsregler, Nachtabschaltung und Wetterseite. Die stabile Fassung gibt es im <a href="https://deffel6.github.io/anker-solix-display/" style="color:#f0a500">Hauptprojekt</a>.</p>
+  <h1>⚡ Anker Solix Display <span style='color:#f0a500'>BETA</span></h1>
+  <div class="note" style="border-left-color:#4faaff;margin-bottom:18px">Ausweichseite: Die Firmware wird direkt aus dem GitHub-Repository geladen. Inhaltlich identisch mit der regul&auml;ren Installationsseite.</div><p class="sub">Testversion 1.22.0 – ohne Touch, mit Helligkeitsregler, Nachtabschaltung und Wetterseite. Die stabile Fassung gibt es im <a href="https://deffel6.github.io/anker-solix-display/" style="color:#f0a500">Hauptprojekt</a>.</p>
 
   <div class="warn">
     <h3>⚠️ Ohne Gewähr bei neuerer Solarbank-Firmware</h3>
@@ -97,7 +97,7 @@
   </div>
 
   <div class="card cta">
-    <esp-web-install-button manifest="manifest.json">
+    <esp-web-install-button manifest="https://raw.githubusercontent.com/deffel6/anker-solix-display-beta/main/manifest.json">
       <button slot="activate" style="
         font:600 1rem/1 inherit; padding:15px 32px; cursor:pointer;
         background:var(--accent); color:#000; border:none; border-radius:10px;">
@@ -128,7 +128,7 @@
   <div class="card">
     <h2>Wetterseite</h2>
     <p style="color:var(--dim);font-size:.92rem;margin-bottom:10px">
-    Das Display hat eine zweite Seite mit der <strong>Wettervorhersage
+    Die Beta hat eine zweite Displayseite mit der <strong>Wettervorhersage
     f&uuml;r heute und morgen</strong>: Piktogramm (Sonne, Wolke, Regen),
     H&ouml;chst-/Tiefsttemperatur, Sonnenstunden, Regenmenge und die aktuelle
     Globalstrahlung in W/qm. Die Daten kommen von open-meteo.com &ndash;
@@ -136,7 +136,7 @@
     <p style="color:var(--dim);font-size:.92rem;margin-bottom:10px">
     <strong>Wichtig:</strong> Umgeschaltet wird <strong>nur &uuml;ber die
     Weboberfl&auml;che</strong> &ndash; am Display selbst l&auml;sst sich die
-    Seite nicht wechseln, diese Fassung ist f&uuml;r Ger&auml;te ohne
+    Seite nicht wechseln, die Beta ist f&uuml;r Ger&auml;te ohne
     Touch-Bedienung gedacht.</p>
     <ol>
       <li>Weboberfl&auml;che des Displays im Heimnetz &ouml;ffnen (IP siehe Display).</li>
@@ -180,7 +180,7 @@
     <p class="small">Das Projekt entsteht in der Freizeit und bleibt kostenlos.
     Wer etwas dazugeben möchte, schreibt einfach an dieselbe Adresse.
     Fehlerberichte gehen auch
-    <a href="https://github.com/deffel6/anker-solix-display/issues">über GitHub</a>.</p>
+    <a href="https://github.com/deffel6/anker-solix-display-beta/issues">über GitHub</a>.</p>
   </div>
 
   <footer>
