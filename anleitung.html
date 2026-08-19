@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anker Solix Display &ndash; Anleitung</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --card:#161616; --line:#2a2a2a;
+    --fg:#eee; --dim:#999; --accent:#f0a500;
+    --beta:#4faaff; --ok:#4caf50; --warn:#ff6666;
+  }
+  @media (prefers-color-scheme:light){
+    :root{ --bg:#f6f6f6; --card:#fff; --line:#e2e2e2; --fg:#1a1a1a; --dim:#666; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--fg);
+    line-height:1.6; padding:24px; display:flex; justify-content:center;
+  }
+  .wrap{width:100%;max-width:720px}
+  h1{font-size:1.6rem;margin-bottom:4px}
+  .sub{color:var(--dim);margin-bottom:24px}
+  h2{
+    font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;
+    color:var(--accent);margin:30px 0 12px;
+  }
+  h3{font-size:1rem;margin:18px 0 6px}
+  .card{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:20px 22px; margin-bottom:14px;
+  }
+  p{color:var(--dim);font-size:.95rem;margin-bottom:10px}
+  p:last-child{margin-bottom:0}
+  ol,ul{color:var(--dim);font-size:.95rem;padding-left:20px;margin-bottom:10px}
+  li{margin-bottom:6px}
+  strong{color:var(--fg)}
+  code{
+    font-family:ui-monospace,Menlo,monospace;font-size:.85em;
+    background:#8881;border:1px solid var(--line);border-radius:5px;padding:1px 5px;
+  }
+  table{width:100%;border-collapse:collapse;margin:6px 0 4px}
+  td,th{
+    padding:8px 0;border-bottom:1px solid var(--line);
+    font-size:.92rem;color:var(--dim);text-align:left;vertical-align:top;
+  }
+  th{color:var(--fg);font-size:.8rem;text-transform:uppercase;letter-spacing:.05em}
+  tr:last-child td{border-bottom:none}
+  td:first-child{width:38%;color:var(--fg);font-weight:600;padding-right:14px}
+  .panels{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin-bottom:6px}
+  .panel{text-align:center}
+  .panel svg{border-radius:50%;box-shadow:0 0 0 6px #1e1e1e,0 0 0 7px #333}
+  .panel figcaption{color:var(--dim);font-size:.82rem;margin-top:10px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:7px;
+      vertical-align:baseline}
+  .note{
+    border-left:3px solid var(--accent);padding-left:12px;
+    color:var(--dim);font-size:.9rem;margin:10px 0;
+  }
+  a{color:var(--accent)}
+  footer{text-align:center;color:var(--dim);font-size:.85rem;margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>&#9889; Anker Solix Display &ndash; Anleitung</h1>
+  <p class="sub">Was das Ger&auml;t anzeigt, was die Farben bedeuten und wie es
+  eingestellt wird.</p>
+
+  <div class="card">
+    <p>Das Display h&auml;ngt sich an denselben MQTT-Broker, mit dem auch die
+    Anker-App spricht. Die Werte kommen dadurch etwa <strong>alle drei
+    Sekunden</strong> herein &ndash; nicht alle f&uuml;nf Minuten wie bei einer
+    Abfrage &uuml;ber die normale Schnittstelle. Bedient wird ausschlie&szlig;lich
+    &uuml;ber die Weboberfl&auml;che im Browser; das Panel selbst hat keine
+    Touch-Bedienung.</p>
+  </div>
+
+  <!-- ══════════ Anzeige ══════════ -->
+  <h2>Die beiden Anzeigen</h2>
+
+  <div class="card">
+    <div class="panels">
+      <figure class="panel">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="Messwerte"><defs><clipPath id="cpMesswerte"><circle cx="120" cy="120" r="120"/></clipPath></defs><circle cx="120" cy="120" r="120" fill="#000"/><g clip-path="url(#cpMesswerte)"><text x="120" y="35" font-size="35" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">10:25</text><text x="120" y="69" font-size="18" font-weight="400" fill="#787878" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">19.08.2026</text><text x="38" y="89" font-size="18" font-weight="400" fill="#ffd200" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">PV</text><text x="120" y="89" font-size="18" font-weight="400" fill="#787878" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">AKKU</text><text x="202" y="89" font-size="18" font-weight="400" fill="#00ff78" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">EINSP</text><text x="38" y="109" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">842</text><text x="38" y="127" font-size="18" font-weight="400" fill="#ffd200" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">W</text><text x="120" y="125" font-size="35" font-weight="700" fill="#00ff78" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">76%</text><text x="202" y="109" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">415</text><text x="202" y="127" font-size="18" font-weight="400" fill="#00ff78" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">W</text><rect x="102.5" y="142.5" width="35" height="15" fill="none" stroke="#00ff78" stroke-width="1"/><rect x="138" y="146" width="5" height="8" fill="#00ff78"/><polygon points="120,130 113,140 127,140" fill="#00ff78"/><text x="120" y="187" font-size="18" font-weight="400" fill="#00ff78" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">EINGANG</text><text x="120" y="209" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">310W</text><circle cx="204" cy="64" r="5" fill="#00ff78"/></g></svg>
+        <figcaption>Messwerte &ndash; Standardanzeige</figcaption>
+      </figure>
+      <figure class="panel">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="Wetter"><defs><clipPath id="cpWetter"><circle cx="120" cy="120" r="120"/></clipPath></defs><circle cx="120" cy="120" r="120" fill="#000"/><g clip-path="url(#cpWetter)"><text x="120" y="29" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">10:25</text><text x="68" y="55" font-size="18" font-weight="400" fill="#ff8c00" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">HEUTE</text><text x="172" y="55" font-size="18" font-weight="400" fill="#ff8c00" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">MORGEN</text><line x1="120.5" y1="48.5" x2="120.5" y2="184.5" stroke="#2d2d2d" stroke-width="1"/><circle cx="68" cy="84" r="14" fill="#ffd200"/><line x1="85.5" y1="84.5" x2="89.5" y2="84.5" stroke="#ffd200" stroke-width="2"/><line x1="51.5" y1="84.5" x2="47.5" y2="84.5" stroke="#ffd200" stroke-width="2"/><line x1="68.5" y1="101.5" x2="68.5" y2="105.5" stroke="#ffd200" stroke-width="2"/><line x1="68.5" y1="67.5" x2="68.5" y2="63.5" stroke="#ffd200" stroke-width="2"/><line x1="79.5" y1="95.5" x2="82.5" y2="98.5" stroke="#ffd200" stroke-width="2"/><line x1="79.5" y1="72.5" x2="82.5" y2="69.5" stroke="#ffd200" stroke-width="2"/><line x1="56.5" y1="95.5" x2="53.5" y2="98.5" stroke="#ffd200" stroke-width="2"/><line x1="56.5" y1="72.5" x2="53.5" y2="69.5" stroke="#ffd200" stroke-width="2"/><text x="68" y="131" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">24/13</text><circle cx="34" cy="153" r="4" fill="#ffd200"/><line x1="41.5" y1="153.5" x2="45.5" y2="153.5" stroke="#ffd200" stroke-width="2"/><line x1="27.5" y1="153.5" x2="23.5" y2="153.5" stroke="#ffd200" stroke-width="2"/><line x1="34.5" y1="160.5" x2="34.5" y2="164.5" stroke="#ffd200" stroke-width="2"/><line x1="34.5" y1="146.5" x2="34.5" y2="142.5" stroke="#ffd200" stroke-width="2"/><line x1="38.5" y1="157.5" x2="41.5" y2="160.5" stroke="#ffd200" stroke-width="2"/><line x1="38.5" y1="148.5" x2="41.5" y2="145.5" stroke="#ffd200" stroke-width="2"/><line x1="29.5" y1="157.5" x2="26.5" y2="160.5" stroke="#ffd200" stroke-width="2"/><line x1="29.5" y1="148.5" x2="26.5" y2="145.5" stroke="#ffd200" stroke-width="2"/><text x="72" y="159" font-size="18" font-weight="400" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">9.4h</text><polygon points="34,170 31,177 37,177" fill="#787878"/><circle cx="34" cy="177" r="3" fill="#787878"/><text x="72" y="183" font-size="18" font-weight="400" fill="#787878" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">0.0mm</text><circle cx="159" cy="80" r="9" fill="#787878"/><circle cx="185" cy="80" r="9" fill="#787878"/><circle cx="169" cy="74" r="13" fill="#787878"/><rect x="159" y="77" width="26" height="13" fill="#787878"/><line x1="162.5" y1="92.5" x2="160.5" y2="98.5" stroke="#00aaff" stroke-width="2"/><line x1="172.5" y1="92.5" x2="170.5" y2="98.5" stroke="#00aaff" stroke-width="2"/><line x1="181.5" y1="92.5" x2="179.5" y2="98.5" stroke="#00aaff" stroke-width="2"/><text x="172" y="131" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">21/14</text><circle cx="138" cy="153" r="4" fill="#ffd200"/><line x1="145.5" y1="153.5" x2="149.5" y2="153.5" stroke="#ffd200" stroke-width="2"/><line x1="131.5" y1="153.5" x2="127.5" y2="153.5" stroke="#ffd200" stroke-width="2"/><line x1="138.5" y1="160.5" x2="138.5" y2="164.5" stroke="#ffd200" stroke-width="2"/><line x1="138.5" y1="146.5" x2="138.5" y2="142.5" stroke="#ffd200" stroke-width="2"/><line x1="142.5" y1="157.5" x2="145.5" y2="160.5" stroke="#ffd200" stroke-width="2"/><line x1="142.5" y1="148.5" x2="145.5" y2="145.5" stroke="#ffd200" stroke-width="2"/><line x1="133.5" y1="157.5" x2="130.5" y2="160.5" stroke="#ffd200" stroke-width="2"/><line x1="133.5" y1="148.5" x2="130.5" y2="145.5" stroke="#ffd200" stroke-width="2"/><text x="176" y="159" font-size="18" font-weight="400" fill="#ffffff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">4.2h</text><polygon points="138,170 135,177 141,177" fill="#00aaff"/><circle cx="138" cy="177" r="3" fill="#00aaff"/><text x="176" y="183" font-size="18" font-weight="400" fill="#00aaff" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">3.8mm</text><text x="126" y="211" font-size="18" font-weight="400" fill="#ffd200" text-anchor="middle" font-family="Helvetica,Arial,sans-serif">412 W/qm</text><circle cx="74" cy="206" r="4" fill="#ffd200"/><line x1="81.5" y1="206.5" x2="85.5" y2="206.5" stroke="#ffd200" stroke-width="2"/><line x1="67.5" y1="206.5" x2="63.5" y2="206.5" stroke="#ffd200" stroke-width="2"/><line x1="74.5" y1="213.5" x2="74.5" y2="217.5" stroke="#ffd200" stroke-width="2"/><line x1="74.5" y1="199.5" x2="74.5" y2="195.5" stroke="#ffd200" stroke-width="2"/><line x1="78.5" y1="210.5" x2="81.5" y2="213.5" stroke="#ffd200" stroke-width="2"/><line x1="78.5" y1="201.5" x2="81.5" y2="198.5" stroke="#ffd200" stroke-width="2"/><line x1="69.5" y1="210.5" x2="66.5" y2="213.5" stroke="#ffd200" stroke-width="2"/><line x1="69.5" y1="201.5" x2="66.5" y2="198.5" stroke="#ffd200" stroke-width="2"/><circle cx="204" cy="64" r="5" fill="#00ff78"/></g></svg>
+        <figcaption>Wetter &ndash; 10 s, dann zur&uuml;ck</figcaption>
+      </figure>
+    </div>
+    <p class="note">Nachbildung der echten Anzeige, gezeichnet aus demselben
+    Aufbau wie im Ger&auml;t. Die Zahlen sind Beispielwerte.</p>
+  </div>
+
+  <h3>Messwerte, von oben nach unten</h3>
+  <div class="card">
+    <table>
+      <tr><th>Stelle</th><th>Bedeutung</th></tr>
+      <tr><td>Uhrzeit gro&szlig;, darunter Datum</td>
+          <td>Aus dem Zeitserver geholt, nicht von der Solarbank. Steht hier
+          nichts, hat das Ger&auml;t noch keine Zeit bekommen.</td></tr>
+      <tr><td>PV (links, gelb)</td>
+          <td>Was die Module gerade liefern, in Watt. Die Aufteilung auf die
+          einzelnen Panels steht in der Weboberfl&auml;che.</td></tr>
+      <tr><td>AKKU (Mitte, gro&szlig;)</td>
+          <td>Ladestand des gesamten Speichers in Prozent, also Kopfstation und
+          Zusatzpacks zusammen.</td></tr>
+      <tr><td>NETZ / BEZUG / EINSP (rechts)</td>
+          <td>Leistung am Hausanschluss. Die Beschriftung wechselt mit der
+          Richtung, siehe Farbtabelle unten.</td></tr>
+      <tr><td>Batteriesymbol mit Pfeil</td>
+          <td>L&auml;dt der Speicher oder gibt er ab. Pfeil nach oben und gr&uuml;n:
+          Ladung. Pfeil nach unten und rot: Entladung. Waagerechter Strich:
+          weder noch.</td></tr>
+      <tr><td>EINGANG / AUSGANG mit Wattzahl</td>
+          <td>Wie viel gerade in den Speicher hinein- oder aus ihm herausflie&szlig;t.
+          Ruht der Speicher, steht dort <code>--</code> und <code>0W</code>.</td></tr>
+      <tr><td>Punkt oben rechts</td>
+          <td>Update-Anzeige, siehe eigener Abschnitt.</td></tr>
+    </table>
+  </div>
+
+  <h3>Was die Farben sagen</h3>
+  <div class="card">
+    <table>
+      <tr><th>Farbe</th><th>Wo und wann</th></tr>
+      <tr><td><span class="sw" style="background:#00ff78"></span>Gr&uuml;n</td>
+          <td>Ladestand ab 50&nbsp;%; Einspeisung ins Netz; Ladung des Speichers.</td></tr>
+      <tr><td><span class="sw" style="background:#ffd200"></span>Gelb</td>
+          <td>Ladestand zwischen 20 und 50&nbsp;%; au&szlig;erdem die feste Farbe der
+          PV-Beschriftung.</td></tr>
+      <tr><td><span class="sw" style="background:#ff3c3c"></span>Rot</td>
+          <td>Ladestand unter 20&nbsp;%; Bezug aus dem Netz; Entladung des Speichers.</td></tr>
+      <tr><td><span class="sw" style="background:#00aaff"></span>Blau</td>
+          <td>Netz im Leerlauf (weniger als ein halbes Watt in beide Richtungen);
+          au&szlig;erdem die IP-Adresse in den Startmeldungen.</td></tr>
+      <tr><td><span class="sw" style="background:#787878"></span>Grau</td>
+          <td>Ruhender Speicher und alles Nebens&auml;chliche wie Datum und
+          Beschriftungen.</td></tr>
+    </table>
+  </div>
+
+  <h3>Die Wetterseite</h3>
+  <div class="card">
+    <p>Aufgerufen wird sie in der Weboberfl&auml;che unter <em>Anzeige auf dem
+    Display</em>. Nach <strong>10 Sekunden</strong> springt das Display von selbst
+    zur&uuml;ck auf die Messwerte &ndash; ohne Touch g&auml;be es sonst keinen
+    bequemen Weg zur&uuml;ck.</p>
+    <table>
+      <tr><th>Stelle</th><th>Bedeutung</th></tr>
+      <tr><td>HEUTE / MORGEN</td>
+          <td>Zwei Spalten, links heute, rechts morgen.</td></tr>
+      <tr><td>Gro&szlig;es Symbol</td>
+          <td>Regen schl&auml;gt Wolken, Wolken schlagen Sonne: ab 1&nbsp;mm
+          Regen die Regenwolke, sonst ab 65&nbsp;% Bew&ouml;lkung die Wolke, ab
+          25&nbsp;% Sonne mit Wolke, darunter die blanke Sonne.</td></tr>
+      <tr><td>Zahlenpaar darunter</td>
+          <td>H&ouml;chst- und Tiefsttemperatur des Tages in Grad.</td></tr>
+      <tr><td>Sonne mit Stundenwert</td>
+          <td>Sonnenstunden des Tages.</td></tr>
+      <tr><td>Tropfen mit Millimeter</td>
+          <td>Regenmenge. Blau, sobald mehr als ein halber Millimeter erwartet
+          wird, sonst grau.</td></tr>
+      <tr><td>Unten mittig, gelb</td>
+          <td>Aktuelle Globalstrahlung in Watt pro Quadratmeter &ndash; der beste
+          Anhaltspunkt daf&uuml;r, was die Module gleich liefern werden.</td></tr>
+    </table>
+    <p class="note">Die Vorhersage kommt von open-meteo.com, ohne Anmeldung und
+    ohne Schl&uuml;ssel, und wird alle 30 Minuten aufgefrischt. Ohne eingetragenen
+    Standort steht dort <em>Standort fehlt</em>.</p>
+  </div>
+
+  <!-- ══════════ Sondermeldungen ══════════ -->
+  <h2>Meldungen statt Messwerten</h2>
+  <div class="card">
+    <table>
+      <tr><th>Anzeige</th><th>Was zu tun ist</th></tr>
+      <tr><td>Setup-Modus mit WLAN-Namen <code>Anker-Display-Setup</code></td>
+          <td>Das Ger&auml;t kennt noch kein WLAN. Mit diesem Netz verbinden, der
+          Browser &ouml;ffnet die Einrichtung von selbst &ndash; sonst
+          <code>192.168.4.1</code> aufrufen.</td></tr>
+      <tr><td><span style="color:#ff6666">Anker-Login falsch!</span></td>
+          <td>Adresse oder Passwort stimmen nicht. Die angezeigte IP im Browser
+          &ouml;ffnen und die Zugangsdaten neu eingeben.</td></tr>
+      <tr><td>Decodiere Daten <span style="color:#ff8c00">(orange)</span></td>
+          <td>Kein Fehler: die Verbindung steht, die erste Nachricht der
+          Solarbank ist nur noch nicht da. Nach dem Start normal.</td></tr>
+      <tr><td><span style="color:#ff6666">Keine Verbindung</span></td>
+          <td>Die MQTT-Verbindung fehlt. Das Ger&auml;t versucht es alle
+          15 Sekunden erneut; h&auml;lt es an, WLAN und Zugangsdaten pr&uuml;fen.</td></tr>
+      <tr><td>Schwarzes Display</td>
+          <td>Vermutlich die Nachtabschaltung. Zeitfenster in der
+          Weboberfl&auml;che pr&uuml;fen.</td></tr>
+    </table>
+  </div>
+
+  <!-- ══════════ Punkt ══════════ -->
+  <h2>Der Punkt oben rechts</h2>
+  <div class="card">
+    <table>
+      <tr><td><span class="sw" style="background:#00ff78"></span>Gr&uuml;n</td>
+          <td>Firmware ist aktuell.</td></tr>
+      <tr><td><span class="sw" style="background:#ffd200"></span>Gelb</td>
+          <td>Eine neuere Beta steht bereit.</td></tr>
+      <tr><td><span class="sw" style="background:#ff3c3c"></span>Rot</td>
+          <td>Eine neue stabile Fassung ist erschienen. In der Weboberfl&auml;che
+          l&auml;sst sich der Hinweis quittieren, dann erlischt der Punkt bis zur
+          n&auml;chsten Ver&ouml;ffentlichung.</td></tr>
+    </table>
+    <p>Gepr&uuml;ft wird zwei Minuten nach dem Start und danach alle sechs
+    Stunden; in der Weboberfl&auml;che geht es auch sofort.</p>
+  </div>
+
+  <!-- ══════════ Weboberflaeche ══════════ -->
+  <h2>Weboberfl&auml;che</h2>
+  <div class="card">
+    <p>Die IP-Adresse des Ger&auml;ts im Browser &ouml;ffnen &ndash; sie steht beim
+    Start auf dem Display und im Router. Die Seite frischt sich alle zehn
+    Sekunden auf, h&auml;lt aber inne, solange in ein Feld getippt wird.</p>
+    <table>
+      <tr><th>Einstellung</th><th>Wirkung</th></tr>
+      <tr><td>Messwerte oben</td>
+          <td>Solar, Akku, Akkuleistung, Netz und Hausverbrauch als Tabelle,
+          dazu jedes Panel einzeln mit Tagesertrag.</td></tr>
+      <tr><td>Teiler f&uuml;r den Z&auml;hler</td>
+          <td>Nur n&ouml;tig, wenn der Netzwert um Faktor 10, 100 oder 1000
+          danebenliegt &ndash; die Einheit ist je Z&auml;hler verschieden.</td></tr>
+      <tr><td>Akkukapazit&auml;t</td>
+          <td>Gesamtkapazit&auml;t in Wattstunden, Grundlage der Prozentanzeige.</td></tr>
+      <tr><td>Anzeige drehen</td>
+          <td>0, 90, 180 oder 270 Grad, ohne Neustart.</td></tr>
+      <tr><td>Anzeige auf dem Display</td>
+          <td>Zwischen Messwerten und Wetter umschalten.</td></tr>
+      <tr><td>Standort f&uuml;rs Wetter</td>
+          <td>Breite und L&auml;nge, Komma oder Punkt egal. Ohne Standort bleibt
+          die Wetterseite leer.</td></tr>
+      <tr><td>Helligkeit</td>
+          <td>Schieberegler von 5 bis 255, wirkt sofort und &uuml;berdauert
+          Neustarts.</td></tr>
+      <tr><td>Display nachts aus</td>
+          <td>Von-bis-Zeitfenster, darf &uuml;ber Mitternacht reichen. Ohne
+          g&uuml;ltige Uhrzeit bleibt das Display an.</td></tr>
+      <tr><td>Akkupacks im Detail</td>
+          <td>Je Pack Ladestand, f&uuml;nf Zellspannungen, Summe, Spreizung und
+          vier Temperaturen. Diese Nachricht kommt nur alle zwei bis drei
+          Minuten.</td></tr>
+      <tr><td>Anlage wechseln / Zugangsdaten &auml;ndern</td>
+          <td>Andere Solarbank derselben Anlage w&auml;hlen (startet neu) oder
+          Anker-Zugang neu hinterlegen.</td></tr>
+    </table>
+  </div>
+
+  <!-- ══════════ Inbetriebnahme ══════════ -->
+  <h2>Erste Inbetriebnahme</h2>
+  <div class="card">
+    <ol>
+      <li>Firmware &uuml;ber den <a href="https://deffel6.github.io/anker-solix-display/">Web-Installer</a>
+      aufspielen &ndash; Chrome oder Edge am Rechner, das Ger&auml;t per USB-Kabel.</li>
+      <li>Nach dem Start zeigt das Display den Setup-Modus. Mit dem WLAN
+      <code>Anker-Display-Setup</code> verbinden.</li>
+      <li>Im Browser das Heim-WLAN und die Anker-Zugangsdaten eintragen. Es
+      sind dieselben wie in der App.</li>
+      <li>Das Ger&auml;t meldet sich an, &uuml;bernimmt die erste gefundene Anlage
+      und zeigt die IP-Adresse. Diese Adresse ist ab jetzt die
+      Bedienoberfl&auml;che.</li>
+      <li>Erste Zahlen erscheinen, sobald die erste MQTT-Nachricht da ist &ndash;
+      das dauert nach dem Start einen Moment.</li>
+    </ol>
+    <p class="note">Die Anker-App und das Display k&ouml;nnen gleichzeitig
+    angemeldet sein. Meldet sich das Display allerdings mit denselben Daten neu
+    an, kann die App eine erneute Anmeldung verlangen.</p>
+  </div>
+
+  <footer>
+    <a href="versionen.html">Alle Versionen</a> &middot;
+    <a href="https://github.com/deffel6/anker-solix-display">Quelltext auf GitHub</a> &middot;
+    Lizenz: PolyForm Noncommercial 1.0.0
+  </footer>
+</div>
+</body>
+</html>
